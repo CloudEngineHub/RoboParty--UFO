@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import ast
 import inspect
 import json
 import tempfile
@@ -12,8 +11,10 @@ from unittest.mock import patch
 import torch
 from torch import nn
 
-from humanoidverse.tracking_inference import _export_policy_model
-from humanoidverse.utils.helpers import export_meta_policy_as_onnx
+from ufo.tools.export_onnx import export_meta_policy_as_onnx, export_policy_model
+from ufo.tools.export_onnx import _deployment_contract
+from ufo.envs.config import MJLabEnvConfig
+from ufo.tools.robot_config import load_robot_training_spec
 
 
 class _FakeSpace:
@@ -27,9 +28,15 @@ class _FakeInputFilter:
 
 
 class _FakeActor(nn.Module):
-    def __init__(self, input_dim: int) -> None:
+    def __init__(self, input_dim: int, action_dim: int) -> None:
         super().__init__()
         self.input_filter = _FakeInputFilter(input_dim)
+        self.action_dim = action_dim
+
+    def forward(self, actor_dict, ctx, std):
+        self.last_actor_dict_shapes = {key: tuple(value.shape) for key, value in actor_dict.items()}
+        self.last_ctx_shape = tuple(ctx.shape)
+        return SimpleNamespace(mean=torch.zeros(ctx.shape[0], self.action_dim, dtype=ctx.dtype, device=ctx.device))
 
 
 class _FakePolicyModel(nn.Module):
@@ -53,8 +60,10 @@ class _FakePolicyModel(nn.Module):
         }
         self.action_dim = int(action_dim)
         actor_input_dim = sum(int(self.obs_space[key].shape[0]) for key in actor_input_keys)
-        self._actor = _FakeActor(actor_input_dim)
+        self._actor = _FakeActor(actor_input_dim, action_dim)
+        self._obs_normalizer = nn.Identity()
         self.cfg = SimpleNamespace(
+            actor_std=0.05,
             archi=SimpleNamespace(
                 z_dim=int(z_dim),
                 actor=SimpleNamespace(input_filter=SimpleNamespace(key=list(actor_input_keys))),
@@ -63,10 +72,6 @@ class _FakePolicyModel(nn.Module):
         self.last_actor_dict_shapes: dict[str, tuple[int, ...]] = {}
         self.last_ctx_shape: tuple[int, ...] | None = None
 
-    def act(self, actor_dict: dict[str, torch.Tensor], ctx: torch.Tensor) -> torch.Tensor:
-        self.last_actor_dict_shapes = {key: tuple(value.shape) for key, value in actor_dict.items()}
-        self.last_ctx_shape = tuple(ctx.shape)
-        return torch.zeros(ctx.shape[0], self.action_dim, dtype=ctx.dtype, device=ctx.device)
 
 
 def _fake_robot_training(num_dof: int) -> SimpleNamespace:
@@ -81,10 +86,55 @@ def _fake_robot_training(num_dof: int) -> SimpleNamespace:
 
 
 class RobotConfigOnnxExportTest(unittest.TestCase):
+    def test_deployment_contract_uses_saved_observation_and_motor_settings(self):
+        root = Path(__file__).resolve().parents[1]
+        spec = load_robot_training_spec(root / 'configs/robots/g1_29dof.yaml')
+        snapshot = spec.to_env_dict()
+        gain_key = next(key for key in snapshot['stiffness'] if key in 'waist_yaw_joint')
+        snapshot['stiffness'][gain_key] = 321.
+        env = MJLabEnvConfig(motion_data_path='unused.pkl', robot_training=snapshot,
+            task_overrides={'obs': {'obs_scales': {'base_ang_vel': .5, 'dof_pos': 2., 'history_actor': 3.}}})
+        model = _FakePolicyModel(state_dim=64, last_action_dim=29, history_actor_dim=372,
+            action_dim=29, actor_input_keys=['state', 'last_action', 'history_actor'])
+        contract = _deployment_contract(model, env)
+        obs = contract['deployment']['observation']['policy']
+        self.assertEqual(obs['base_ang_vel']['scale'], .5)
+        self.assertEqual(obs['base_ang_vel_history']['scale'], 1.5)
+        self.assertEqual(obs['dof_pos_minus_default_history']['scale'], 6.)
+        self.assertEqual(contract['observation_order'][:5], ['dof_pos_minus_default', 'dof_vel', 'projected_gravity', 'base_ang_vel', 'prev_actions'])
+        self.assertFalse(contract['history_includes_current'])
+        self.assertFalse(contract['history_oldest_first'])
+        self.assertEqual(contract['deployment']['joint_kp']['waist_yaw_joint'], 321.)
+
+    def test_rp1_export_preserves_oldest_first_history(self):
+        root = Path(__file__).resolve().parents[1]
+        spec = load_robot_training_spec(root / "configs/robots/rp1_3.yaml")
+        env = MJLabEnvConfig(motion_data_path="unused.pkl", robot_training=spec.to_env_dict(), task_overrides=spec.task_overrides)
+        model = _FakePolicyModel(state_dim=54, last_action_dim=24, history_actor_dim=312,
+                                 action_dim=24, actor_input_keys=["state", "last_action", "history_actor"])
+        with tempfile.TemporaryDirectory() as tmpdir, patch("ufo.tools.export_onnx.torch.onnx.export"):
+            metadata = export_policy_model(model, Path(tmpdir), spec, env_config=env)
+            saved = json.loads((Path(tmpdir) / "_FakePolicyModel.meta.json").read_text())
+            self.assertTrue((Path(tmpdir) / "_FakePolicyModel.deploy.yaml").is_file())
+        self.assertTrue(metadata["history_oldest_first"])
+        self.assertTrue(saved["history_oldest_first"])
+        self.assertFalse(saved["history_includes_current"])
+        self.assertEqual(saved["control_joint_names"], list(spec.robot.control_joint_names))
+
+    def test_invalid_contract_fails_before_writing_policy(self):
+        model = _FakePolicyModel(state_dim=64, last_action_dim=29)
+        with tempfile.TemporaryDirectory() as tmpdir, \
+             patch("ufo.tools.export_onnx._deployment_contract", side_effect=ValueError("invalid contract")), \
+             patch("ufo.tools.export_onnx.torch.onnx.export") as export:
+            with self.assertRaisesRegex(ValueError, "invalid contract"):
+                export_policy_model(model, Path(tmpdir), _fake_robot_training(29), env_config=object())
+            export.assert_not_called()
+            self.assertEqual(list(Path(tmpdir).iterdir()), [])
+
     def _export_with_mock(self, model: _FakePolicyModel, output_name: str = "FakePolicyModel.onnx"):
         tmpdir = tempfile.TemporaryDirectory()
         self.addCleanup(tmpdir.cleanup)
-        patcher = patch("humanoidverse.utils.helpers.torch.onnx.export")
+        patcher = patch("ufo.tools.export_onnx.torch.onnx.export")
         onnx_export = patcher.start()
         self.addCleanup(patcher.stop)
         metadata = export_meta_policy_as_onnx(model, Path(tmpdir.name), output_name)
@@ -153,31 +203,23 @@ class RobotConfigOnnxExportTest(unittest.TestCase):
             export_meta_policy_as_onnx(model, "/tmp", "policy.onnx")
 
     def test_tracking_inference_has_no_g1_only_num_dof_export_block(self) -> None:
-        source = Path(__file__).resolve().parents[1] / "humanoidverse" / "tracking_inference.py"
+        source = Path(__file__).resolve().parents[1] / "ufo" / "inference" / "tracking_inference.py"
         text = source.read_text()
         self.assertNotIn("num_dof != 29", text)
         self.assertNotIn("ONNX export currently supports only G1 29-DOF", text)
 
-    def test_goal_and_reward_export_calls_use_current_signature(self) -> None:
-        root = Path(__file__).resolve().parents[1]
-        for relative_path in ("humanoidverse/goal_inference.py", "humanoidverse/reward_inference.py"):
-            source = root / relative_path
-            tree = ast.parse(source.read_text())
-            export_model = next(
-                node
-                for node in ast.walk(tree)
-                if isinstance(node, ast.FunctionDef) and node.name == "_export_model"
-            )
-            export_call = next(
-                node
-                for node in ast.walk(export_model)
-                if isinstance(node, ast.Call)
-                and isinstance(node.func, ast.Name)
-                and node.func.id == "export_meta_policy_as_onnx"
-            )
+    def test_goal_and_reward_share_the_exporter(self) -> None:
+        from types import SimpleNamespace
+        from unittest.mock import patch
 
-            self.assertEqual(len(export_call.args), 3, relative_path)
-            self.assertEqual([keyword.arg for keyword in export_call.keywords], ["z_dim"], relative_path)
+        from ufo.inference.goal_inference import export_policy_model as goal_export
+        from ufo.inference.reward_inference import export_policy_model as reward_export
+        self.assertIs(goal_export, reward_export)
+        model = SimpleNamespace(cfg=SimpleNamespace(archi=SimpleNamespace(z_dim=12)))
+        with tempfile.TemporaryDirectory() as tmpdir, patch("ufo.tools.export_onnx.export_meta_policy_as_onnx") as export:
+            export.return_value = {"output_action_dim": 27}
+            goal_export(model, Path(tmpdir), _fake_robot_training(27))
+            export.assert_called_once_with(model, Path(tmpdir), "SimpleNamespace.onnx", z_dim=12)
 
     def test_tracking_policy_export_writes_robot_metadata_json(self) -> None:
         model = _FakePolicyModel(
@@ -188,8 +230,8 @@ class RobotConfigOnnxExportTest(unittest.TestCase):
             action_dim=27,
             actor_input_keys=["state", "last_action", "history_actor"],
         )
-        with tempfile.TemporaryDirectory() as tmpdir, patch("humanoidverse.utils.helpers.torch.onnx.export"):
-            metadata = _export_policy_model(model, Path(tmpdir), _fake_robot_training(27))
+        with tempfile.TemporaryDirectory() as tmpdir, patch("ufo.tools.export_onnx.torch.onnx.export"):
+            metadata = export_policy_model(model, Path(tmpdir), _fake_robot_training(27))
             metadata_path = Path(tmpdir) / "_FakePolicyModel.meta.json"
             self.assertTrue(metadata_path.exists())
             saved = json.loads(metadata_path.read_text())

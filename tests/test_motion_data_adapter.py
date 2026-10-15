@@ -4,26 +4,33 @@ import csv
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 import joblib
 import numpy as np
+import pytest
 import torch
+from omegaconf import OmegaConf
 
-from humanoidverse.tools.data_inspect import inspect_data_source
-from humanoidverse.utils.motion_data.adapters import (
+from ufo.motion.formats import (
     SUPPORTED_FORMATS,
+    RobotStateMotion,
+    clip_ufo_motion_dict,
     load_motion_data_by_format,
     load_robot_state_csv,
     load_robot_state_npz,
+    read_robot_state_csv,
+    read_robot_state_npz,
+    reorder_dof_by_joint_names,
+    robot_state_dict_to_ufo_motion_dict,
+    robot_state_to_ufo_motion,
+    validate_robot_state_motion,
+    validate_ufo_motion_dict,
 )
-from humanoidverse.utils.motion_data.clip import clip_ufo_motion_dict
-from humanoidverse.utils.motion_data.manifest import prepare_manifest_dataset_path, prepare_motion_manifest
-from humanoidverse.utils.motion_data.robot_state import RobotStateMotion, reorder_dof_by_joint_names, validate_robot_state_motion
-from humanoidverse.utils.motion_data.robot_state_convert import robot_state_dict_to_ufo_motion_dict, robot_state_to_ufo_motion
-from humanoidverse.utils.motion_data.robot_state_readers import read_robot_state_csv, read_robot_state_npz
-from humanoidverse.utils.motion_data.schema import validate_ufo_motion_dict
-from humanoidverse.utils.motion_lib.motion_lib_base import _dof_vel_from_dof_pos, _raw_dof_pos_from_motion_file
-from humanoidverse.utils.robot_spec import load_robot_spec
+from ufo.motion.library import _dof_vel_from_dof_pos, _raw_dof_pos_from_motion_file
+from ufo.motion.manifest import _manifest_robot_config_path, prepare_manifest_dataset_path, prepare_motion_manifest
+from ufo.tools.motion_data import inspect_data_source
+from ufo.tools.robot_config import load_robot_spec, resolve_path, resolve_robot_config_path, robot_spec_from_config
 
 
 def _motion_dict(fps: float = 50.0) -> dict[str, dict]:
@@ -34,6 +41,51 @@ def _motion_dict(fps: float = 50.0) -> dict[str, dict]:
             "fps": fps,
         }
     }
+
+
+@pytest.mark.parametrize("single_dataset", [False, True])
+def test_manifest_rejects_cache_name_collision_before_writing(tmp_path, single_dataset):
+    manifest = tmp_path / "motions.yaml"
+    OmegaConf.save(OmegaConf.create({"datasets": [
+        {"name": name, "format": "ufo_pkl", "weight": 1, "source_path": "missing.pkl", "auto_build": {}}
+        for name in ("a/b", "a b")
+    ]}), manifest)
+    cache = tmp_path / "cache"
+    with pytest.raises(ValueError, match="cache name.*unique"):
+        if single_dataset:
+            prepare_manifest_dataset_path(manifest, "a/b", cache_root=cache)
+        else:
+            prepare_motion_manifest(manifest, cache_root=cache)
+    assert not cache.exists()
+
+
+def test_same_named_manifests_have_independent_reusable_caches(tmp_path):
+    paths = []
+    for marker in (1, 2):
+        folder = tmp_path / str(marker)
+        folder.mkdir()
+        data = _long_motion_dict(seconds=2)
+        data["long"]["root_trans_offset"][:] = marker
+        joblib.dump(data, folder / "source.pkl")
+        manifest = folder / "motions.yaml"
+        OmegaConf.save(OmegaConf.create({"datasets": [{
+            "name": "lafan", "format": "ufo_pkl", "weight": 1, "source_path": "source.pkl",
+            "auto_build": {"train_clip_seconds": 1},
+        }]}), manifest)
+        result = prepare_motion_manifest(manifest, cache_root=tmp_path / "cache")
+        train_path = Path(result.train_data_paths[0])
+        paths.append(train_path)
+        motions = joblib.load(train_path)
+        assert len(motions) == 2
+        for motion in motions.values():
+            np.testing.assert_array_equal(motion["root_trans_offset"], marker)
+            assert len(motion["root_trans_offset"]) == 50
+        modified = train_path.stat().st_mtime_ns
+        reused = prepare_motion_manifest(manifest, cache_root=tmp_path / "cache")
+        assert reused.train_data_paths == result.train_data_paths
+        assert train_path.stat().st_mtime_ns == modified
+        assert prepare_manifest_dataset_path(manifest, "lafan", split="train", cache_root=tmp_path / "cache") == str(train_path)
+    assert paths[0] != paths[1]
 
 
 def _long_motion_dict(seconds: float, fps: float = 50.0) -> dict[str, dict]:
@@ -56,8 +108,8 @@ def _robot_state_motion(
     joint_names: list[str] | None = None,
     zero_quat: bool = False,
 ) -> RobotStateMotion:
-    root_quat = np.zeros((frames, 4), dtype=np.float32) if zero_quat else np.tile(
-        np.asarray([[0.0, 0.0, 0.0, 1.0]], dtype=np.float32), (frames, 1)
+    root_quat = (
+        np.zeros((frames, 4), dtype=np.float32) if zero_quat else np.tile(np.asarray([[0.0, 0.0, 0.0, 1.0]], dtype=np.float32), (frames, 1))
     )
     if dof_pos is None:
         dof_pos = np.zeros((frames, 2), dtype=np.float32)
@@ -201,6 +253,41 @@ def _write_robot_state_npz(path: Path, *, frames: int = 4, swapped_joint_names: 
 
 
 class MotionDataAdapterTest(unittest.TestCase):
+    def test_robot_paths_keep_config_directory_precedence_and_cwd_fallback(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            base, cwd = root / "config", root / "cwd"
+            base.mkdir()
+            cwd.mkdir()
+            for path in (base / "shadow", cwd / "shadow", cwd / "fallback", root / "absolute"):
+                path.touch()
+            (base / "link").symlink_to(root / "absolute")
+            (base / "broken").symlink_to(root / "missing_target")
+            cases = (
+                ("shadow", base / "shadow"),
+                (Path("fallback"), cwd / "fallback"),
+                ("missing", cwd / "missing"),
+                ("~", Path.home()),
+                (root / "absolute", root / "absolute"),
+                ("link", root / "absolute"),
+                ("broken", cwd / "broken"),
+                (base / "broken", root / "missing_target"),
+            )
+            with patch.object(Path, "cwd", return_value=cwd):
+                for raw, expected in cases:
+                    with self.subTest(raw=raw):
+                        self.assertEqual(resolve_path(raw, base_dir=base), expected.resolve())
+                        self.assertEqual(_manifest_robot_config_path({"robot_config": raw}, base / "manifest.yaml"), expected.resolve())
+                        if expected.exists():
+                            self.assertEqual(resolve_robot_config_path(raw, base_dir=base), expected.resolve())
+                        else:
+                            with self.assertRaises(FileNotFoundError) as error:
+                                resolve_robot_config_path(raw, base_dir=base)
+                            self.assertEqual(str(error.exception), f"Robot config does not exist: {expected.resolve()}")
+                with self.assertRaises(FileNotFoundError) as error:
+                    robot_spec_from_config({"name": "tiny", "base_body": "base", "xml_path": "missing"}, base / "robot.yaml")
+                self.assertEqual(str(error.exception), f"Robot XML does not exist: {cwd / 'missing'}")
+
     def test_validate_ufo_motion_dict(self) -> None:
         data = validate_ufo_motion_dict(_motion_dict(), "unit")
         self.assertEqual(list(data), ["tiny"])
@@ -566,7 +653,6 @@ class MotionDataAdapterTest(unittest.TestCase):
             path = prepare_manifest_dataset_path(manifest_path, "pkl", split="inference", cache_root=root / "cache")
             self.assertEqual(Path(path), train_path.resolve())
 
-
     def test_motion_lib_prefers_raw_dof_pos_when_present(self) -> None:
         raw = np.asarray(
             [
@@ -616,7 +702,7 @@ class MotionDataAdapterTest(unittest.TestCase):
             )
             result = prepare_motion_manifest(manifest_path, cache_root=root / "cache")
             self.assertEqual(len(result.train_data_paths), 1)
-            self.assertTrue(result.train_data_paths[0].endswith("robot_train_near10s_ufo.pkl"))
+            self.assertTrue(result.train_data_paths[0].endswith("robot_train_ufo.pkl"))
             self.assertTrue(Path(result.train_data_paths[0]).exists())
 
             inference_path = prepare_manifest_dataset_path(manifest_path, "robot", split="inference", cache_root=root / "cache")
@@ -656,3 +742,26 @@ class MotionDataAdapterTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def test_inspection_and_conversion_share_clip_boundaries():
+    from ufo.motion.formats import clip_ufo_motion_dict
+    from ufo.tools.motion_data import estimate_clip_count
+
+    for frames in (1, 29, 30, 31, 59, 60, 75):
+        for stride in (0.5, 1.0, 2.0):
+            for keep_short in (False, True):
+                options = dict(clip_seconds=1.0, stride_seconds=stride, keep_short=keep_short, min_clip_seconds=0.5)
+                motion = {"a": {"fps": 30, "root_trans_offset": np.zeros((frames, 3)), "pose_aa": np.zeros((frames, 2, 3))}}
+                count = estimate_clip_count(frames, 30, **options)
+                if count:
+                    assert len(clip_ufo_motion_dict(motion, **options)) == count
+                else:
+                    with pytest.raises(ValueError, match="No motion clips"):
+                        clip_ufo_motion_dict(motion, **options)
+    for key in ("clip_seconds", "stride_seconds", "min_clip_seconds"):
+        options = {key: -1}
+        with pytest.raises(ValueError, match=key):
+            estimate_clip_count(100, 30, **options)
+        with pytest.raises(ValueError, match=key):
+            clip_ufo_motion_dict(motion, **options)

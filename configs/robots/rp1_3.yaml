@@ -1,0 +1,566 @@
+# RP1.3 baseline: original model_45989 (2026-09-24), 24 controlled joints.
+name: rp1_24dof
+xml_path: ufo/data/robots/rp1/rp1_24dof.xml
+base_body: base_link
+root_quat_order: xyzw
+coordinate_system: z_up
+dof_unit: rad
+control_joints:
+- left_hip_pitch_joint
+- left_hip_roll_joint
+- left_hip_yaw_joint
+- left_knee_joint
+- left_ankle_pitch_joint
+- left_ankle_roll_joint
+- right_hip_pitch_joint
+- right_hip_roll_joint
+- right_hip_yaw_joint
+- right_knee_joint
+- right_ankle_pitch_joint
+- right_ankle_roll_joint
+- waist_roll_joint
+- waist_yaw_joint
+- left_shoulder_pitch_joint
+- left_shoulder_roll_joint
+- left_shoulder_yaw_joint
+- left_elbow_joint
+- left_wrist_joint
+- right_shoulder_pitch_joint
+- right_shoulder_roll_joint
+- right_shoulder_yaw_joint
+- right_elbow_joint
+- right_wrist_joint
+feet:
+- left_ankle_roll_link
+- right_ankle_roll_link
+hands:
+- left_wrist_link
+- right_wrist_link
+key_bodies:
+- base_link
+- waist_yaw_link
+- left_ankle_roll_link
+- right_ankle_roll_link
+- left_wrist_link
+- right_wrist_link
+default_dof_pos: {}
+training:
+  task_overrides:
+    obs:
+      history_oldest_first: true
+    rewards:
+      reward_penalty_curriculum: false
+      reward_limit:
+        soft_dof_pos_limit: 0.9
+      set_reward: roboparty
+      reward_scales:
+        penalty_torques: -1.0e-05
+        penalty_undesired_contact: 0.0
+        penalty_action_rate: -0.2
+        penalty_ankle_roll: 0.0
+        penalty_feet_ori: 0.0
+        feet_heading_alignment: 0.0
+        penalty_slippage: -2.0
+        limits_dof_pos: -10.0
+        limits_dof_vel: 0.0
+        limits_torque: 0.0
+        height_gated_undesired_contacts: -0.5
+        joint_acc_l2: -5.0e-07
+        joint_velocity_l2: -0.0002
+        joint_energy: -0.0001
+        joint_rated_velocity: -0.05
+        joint_rated_effort: -0.04
+        action_jerk_l2: -0.02
+        angular_momentum_rate_l2: -5.0e-05
+        yaw_angular_momentum_l2: -0.001
+    domain_rand:
+      default_dof_pos_noise_range:
+      - -0.01
+      - 0.01
+      base_com_range:
+        x: &id001
+        - -0.04
+        - 0.04
+        y: *id001
+        z: *id001
+      link_mass_range:
+      - 0.8
+      - 1.2
+      friction_range:
+      - 0.3
+      - 1.6
+      default_dof_pos_startup_only: true
+      push_velocity_range:
+        x:
+        - -0.5
+        - 0.5
+        y:
+        - -0.5
+        - 0.5
+        z:
+        - -0.2
+        - 0.2
+        roll:
+        - -0.52
+        - 0.52
+        pitch:
+        - -0.52
+        - 0.52
+        yaw:
+        - -0.78
+        - 0.78
+      randomize_base_mass: true
+      base_mass_range:
+      - -2.0
+      - 2.0
+      link_mass_bodies:
+      - left_.*_link
+      - right_.*_link
+      mass_scale_inertia: true
+      randomize_pd_gain: true
+      kp_range:
+      - 0.8
+      - 1.2
+      kd_range:
+      - 0.8
+      - 1.2
+      randomize_joint_parameters: true
+      joint_friction_range:
+      - 0.8
+      - 1.2
+      armature_range:
+      - 0.8
+      - 1.2
+  motion_extensions: []
+  semantics:
+    contact_bodies:
+    - left_ankle_roll_link
+    - right_ankle_roll_link
+    undesired_contact_bodies:
+    - base_link
+    - hip
+    - waist
+    - shoulder
+    - elbow
+    - wrist
+    - knee
+    torso_name: waist_yaw_link
+    left_ankle_dof_names:
+    - left_ankle_pitch_joint
+    - left_ankle_roll_joint
+    right_ankle_dof_names:
+    - right_ankle_pitch_joint
+    - right_ankle_roll_joint
+  init_state:
+    pos:
+    - 0.0
+    - 0.0
+    - 0.78
+    rot:
+    - 0.0
+    - 0.0
+    - 0.0
+    - 1.0
+    lin_vel:
+    - 0.0
+    - 0.0
+    - 0.0
+    ang_vel:
+    - 0.0
+    - 0.0
+    - 0.0
+    default_joint_angles:
+      left_hip_pitch_joint: -0.1
+      left_hip_roll_joint: 0.0
+      left_hip_yaw_joint: 0.0
+      left_knee_joint: -0.3
+      left_ankle_pitch_joint: -0.2
+      left_ankle_roll_joint: 0.0
+      right_hip_pitch_joint: 0.1
+      right_hip_roll_joint: 0.0
+      right_hip_yaw_joint: 0.0
+      right_knee_joint: 0.3
+      right_ankle_pitch_joint: -0.2
+      right_ankle_roll_joint: 0.0
+      waist_roll_joint: 0.0
+      waist_yaw_joint: 0.0
+      left_shoulder_pitch_joint: 0.2
+      left_shoulder_roll_joint: 0.2
+      left_shoulder_yaw_joint: 0.0
+      left_elbow_joint: -1.2
+      left_wrist_joint: 0.0
+      right_shoulder_pitch_joint: -0.2
+      right_shoulder_roll_joint: -0.2
+      right_shoulder_yaw_joint: 0.0
+      right_elbow_joint: 1.2
+      right_wrist_joint: 0.0
+  control:
+    action_scale: 0.4
+    action_rescale: false
+    action_clip_value: 8.0
+    normalize_action_to: 8.0
+    effort_limit_scale: 1.0
+    effort_limit:
+    - 145.53
+    - 145.53
+    - 145.53
+    - 145.53
+    - 56.0
+    - 56.0
+    - 145.53
+    - 145.53
+    - 145.53
+    - 145.53
+    - 56.0
+    - 56.0
+    - 145.53
+    - 145.53
+    - 28.0
+    - 28.0
+    - 28.0
+    - 28.0
+    - 28.0
+    - 28.0
+    - 28.0
+    - 28.0
+    - 28.0
+    - 28.0
+    velocity_limit:
+    - 13.61357
+    - 13.61357
+    - 13.61357
+    - 13.61357
+    - 20.94395
+    - 20.94395
+    - 13.61357
+    - 13.61357
+    - 13.61357
+    - 13.61357
+    - 20.94395
+    - 20.94395
+    - 13.61357
+    - 13.61357
+    - 20.94395
+    - 20.94395
+    - 20.94395
+    - 20.94395
+    - 20.94395
+    - 20.94395
+    - 20.94395
+    - 20.94395
+    - 20.94395
+    - 20.94395
+    stiffness:
+      left_hip_pitch_joint: 120.0
+      left_hip_roll_joint: 120.0
+      left_hip_yaw_joint: 90.0
+      left_knee_joint: 120.0
+      left_ankle_pitch_joint: 40.0
+      left_ankle_roll_joint: 40.0
+      right_hip_pitch_joint: 120.0
+      right_hip_roll_joint: 120.0
+      right_hip_yaw_joint: 90.0
+      right_knee_joint: 120.0
+      right_ankle_pitch_joint: 40.0
+      right_ankle_roll_joint: 40.0
+      waist_roll_joint: 150.0
+      waist_yaw_joint: 150.0
+      left_shoulder_pitch_joint: 30.0
+      left_shoulder_roll_joint: 30.0
+      left_shoulder_yaw_joint: 20.0
+      left_elbow_joint: 30.0
+      left_wrist_joint: 20.0
+      right_shoulder_pitch_joint: 30.0
+      right_shoulder_roll_joint: 30.0
+      right_shoulder_yaw_joint: 20.0
+      right_elbow_joint: 30.0
+      right_wrist_joint: 20.0
+    damping:
+      left_hip_pitch_joint: 9.0
+      left_hip_roll_joint: 9.0
+      left_hip_yaw_joint: 6.0
+      left_knee_joint: 9.0
+      left_ankle_pitch_joint: 2.0
+      left_ankle_roll_joint: 2.0
+      right_hip_pitch_joint: 9.0
+      right_hip_roll_joint: 9.0
+      right_hip_yaw_joint: 6.0
+      right_knee_joint: 9.0
+      right_ankle_pitch_joint: 2.0
+      right_ankle_roll_joint: 2.0
+      waist_roll_joint: 12.5
+      waist_yaw_joint: 12.5
+      left_shoulder_pitch_joint: 2.5
+      left_shoulder_roll_joint: 2.5
+      left_shoulder_yaw_joint: 1.5
+      left_elbow_joint: 2.5
+      left_wrist_joint: 1.5
+      right_shoulder_pitch_joint: 2.5
+      right_shoulder_roll_joint: 2.5
+      right_shoulder_yaw_joint: 1.5
+      right_elbow_joint: 2.5
+      right_wrist_joint: 1.5
+  actuator:
+    source: yaml
+    model: roboparty
+    min_delay: 0
+    max_delay: 2
+    joints:
+      left_hip_pitch_joint:
+        effort_limit: 145.53
+        velocity_limit: 13.61357
+        armature: 0.02
+        friction: 0.1
+        keep_velocity: 8.37758
+        rated_effort: 44.0
+        rated_velocity: 8.37758
+        viscous_friction: 0.02
+      left_hip_roll_joint:
+        effort_limit: 145.53
+        velocity_limit: 13.61357
+        armature: 0.02
+        friction: 0.1
+        keep_velocity: 8.37758
+        rated_effort: 44.0
+        rated_velocity: 8.37758
+        viscous_friction: 0.02
+      left_hip_yaw_joint:
+        effort_limit: 145.53
+        velocity_limit: 13.61357
+        armature: 0.02
+        friction: 0.1
+        keep_velocity: 8.37758
+        rated_effort: 44.0
+        rated_velocity: 8.37758
+        viscous_friction: 0.02
+      left_knee_joint:
+        effort_limit: 145.53
+        velocity_limit: 13.61357
+        armature: 0.02
+        friction: 0.1
+        keep_velocity: 8.37758
+        rated_effort: 44.0
+        rated_velocity: 8.37758
+        viscous_friction: 0.02
+      left_ankle_pitch_joint:
+        effort_limit: 56.0
+        velocity_limit: 20.94395
+        armature: 0.01
+        friction: 0.1
+        keep_velocity: 15.70796
+        rated_effort: 19.0
+        rated_velocity: 6.28319
+        viscous_friction: 0.01
+      left_ankle_roll_joint:
+        effort_limit: 56.0
+        velocity_limit: 20.94395
+        armature: 0.01
+        friction: 0.1
+        keep_velocity: 15.70796
+        rated_effort: 19.0
+        rated_velocity: 6.28319
+        viscous_friction: 0.01
+      right_hip_pitch_joint:
+        effort_limit: 145.53
+        velocity_limit: 13.61357
+        armature: 0.02
+        friction: 0.1
+        keep_velocity: 8.37758
+        rated_effort: 44.0
+        rated_velocity: 8.37758
+        viscous_friction: 0.02
+      right_hip_roll_joint:
+        effort_limit: 145.53
+        velocity_limit: 13.61357
+        armature: 0.02
+        friction: 0.1
+        keep_velocity: 8.37758
+        rated_effort: 44.0
+        rated_velocity: 8.37758
+        viscous_friction: 0.02
+      right_hip_yaw_joint:
+        effort_limit: 145.53
+        velocity_limit: 13.61357
+        armature: 0.02
+        friction: 0.1
+        keep_velocity: 8.37758
+        rated_effort: 44.0
+        rated_velocity: 8.37758
+        viscous_friction: 0.02
+      right_knee_joint:
+        effort_limit: 145.53
+        velocity_limit: 13.61357
+        armature: 0.02
+        friction: 0.1
+        keep_velocity: 8.37758
+        rated_effort: 44.0
+        rated_velocity: 8.37758
+        viscous_friction: 0.02
+      right_ankle_pitch_joint:
+        effort_limit: 56.0
+        velocity_limit: 20.94395
+        armature: 0.01
+        friction: 0.1
+        keep_velocity: 15.70796
+        rated_effort: 19.0
+        rated_velocity: 6.28319
+        viscous_friction: 0.01
+      right_ankle_roll_joint:
+        effort_limit: 56.0
+        velocity_limit: 20.94395
+        armature: 0.01
+        friction: 0.1
+        keep_velocity: 15.70796
+        rated_effort: 19.0
+        rated_velocity: 6.28319
+        viscous_friction: 0.01
+      waist_roll_joint:
+        effort_limit: 145.53
+        velocity_limit: 13.61357
+        armature: 0.02
+        friction: 0.1
+        keep_velocity: 8.37758
+        rated_effort: 44.0
+        rated_velocity: 8.37758
+        viscous_friction: 0.02
+      waist_yaw_joint:
+        effort_limit: 145.53
+        velocity_limit: 13.61357
+        armature: 0.02
+        friction: 0.1
+        keep_velocity: 8.37758
+        rated_effort: 44.0
+        rated_velocity: 8.37758
+        viscous_friction: 0.02
+      left_shoulder_pitch_joint:
+        effort_limit: 28.0
+        velocity_limit: 20.94395
+        armature: 0.01
+        friction: 0.1
+        keep_velocity: 15.70796
+        rated_effort: 9.5
+        rated_velocity: 6.28319
+        viscous_friction: 0.01
+      left_shoulder_roll_joint:
+        effort_limit: 28.0
+        velocity_limit: 20.94395
+        armature: 0.01
+        friction: 0.1
+        keep_velocity: 15.70796
+        rated_effort: 9.5
+        rated_velocity: 6.28319
+        viscous_friction: 0.01
+      left_shoulder_yaw_joint:
+        effort_limit: 28.0
+        velocity_limit: 20.94395
+        armature: 0.01
+        friction: 0.1
+        keep_velocity: 15.70796
+        rated_effort: 9.5
+        rated_velocity: 6.28319
+        viscous_friction: 0.01
+      left_elbow_joint:
+        effort_limit: 28.0
+        velocity_limit: 20.94395
+        armature: 0.01
+        friction: 0.1
+        keep_velocity: 15.70796
+        rated_effort: 9.5
+        rated_velocity: 6.28319
+        viscous_friction: 0.01
+      left_wrist_joint:
+        effort_limit: 28.0
+        velocity_limit: 20.94395
+        armature: 0.01
+        friction: 0.1
+        keep_velocity: 15.70796
+        rated_effort: 9.5
+        rated_velocity: 6.28319
+        viscous_friction: 0.01
+      right_shoulder_pitch_joint:
+        effort_limit: 28.0
+        velocity_limit: 20.94395
+        armature: 0.01
+        friction: 0.1
+        keep_velocity: 15.70796
+        rated_effort: 9.5
+        rated_velocity: 6.28319
+        viscous_friction: 0.01
+      right_shoulder_roll_joint:
+        effort_limit: 28.0
+        velocity_limit: 20.94395
+        armature: 0.01
+        friction: 0.1
+        keep_velocity: 15.70796
+        rated_effort: 9.5
+        rated_velocity: 6.28319
+        viscous_friction: 0.01
+      right_shoulder_yaw_joint:
+        effort_limit: 28.0
+        velocity_limit: 20.94395
+        armature: 0.01
+        friction: 0.1
+        keep_velocity: 15.70796
+        rated_effort: 9.5
+        rated_velocity: 6.28319
+        viscous_friction: 0.01
+      right_elbow_joint:
+        effort_limit: 28.0
+        velocity_limit: 20.94395
+        armature: 0.01
+        friction: 0.1
+        keep_velocity: 15.70796
+        rated_effort: 9.5
+        rated_velocity: 6.28319
+        viscous_friction: 0.01
+      right_wrist_joint:
+        effort_limit: 28.0
+        velocity_limit: 20.94395
+        armature: 0.01
+        friction: 0.1
+        keep_velocity: 15.70796
+        rated_effort: 9.5
+        rated_velocity: 6.28319
+        viscous_friction: 0.01
+  fb_agent_overrides:
+    train:
+      lr_discriminator: 2.0e-06
+      reg_coeff: 0.03
+      reg_coeff_aux: 0.03
+      use_bf16_amp: true
+    aux_rewards:
+    - penalty_torques
+    - penalty_action_rate
+    - limits_dof_pos
+    - height_gated_undesired_contacts
+    - penalty_slippage
+    - joint_acc_l2
+    - joint_velocity_l2
+    - joint_energy
+    - joint_rated_velocity
+    - joint_rated_effort
+    - action_jerk_l2
+    - angular_momentum_rate_l2
+    - yaw_angular_momentum_l2
+    aux_rewards_scaling:
+      penalty_action_rate: -0.2
+      limits_dof_pos: -10.0
+      penalty_slippage: -2.0
+      height_gated_undesired_contacts: -0.5
+      penalty_torques: -1.0e-05
+      joint_acc_l2: -5.0e-07
+      joint_velocity_l2: -0.0002
+      joint_energy: -0.0001
+      joint_rated_velocity: -0.05
+      joint_rated_effort: -0.04
+      action_jerk_l2: -0.02
+      angular_momentum_rate_l2: -5.0e-05
+      yaw_angular_momentum_l2: -0.001
+  train_overrides:
+    seed: 52
+    num_env_steps: 384000000
+    checkpoint_every_steps: 16384000
+    eval_every_steps: 3276800
+    log_every_steps: 81920
+    prioritization_scale: 1.5
+    eval_at_start: false

@@ -3,6 +3,8 @@
 __pycache__/
 *.py[cod]
 *.egg-info/
+build/
+dist/
 .pytest_cache/
 .ruff_cache/
 
@@ -23,6 +25,5 @@ tea_debug.log
 # Generated inference media
 model/
 
-# Downloaded public motion data
-humanoidverse/data/lafan_29dof_10s-clipped.pkl
-humanoidverse/data/lafan_29dof.pkl
+# Downloaded or converted motion datasets are distributed separately.
+ufo/data/*.pkl

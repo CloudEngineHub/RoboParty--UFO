@@ -31,25 +31,20 @@ if [[ -z "${UFO_CACHE_DIR:-}" ]]; then
   fi
 fi
 
-mkdir -p \
-  "$UFO_CACHE_DIR/uv" \
-  "$UFO_CACHE_DIR/pycache" \
-  "$UFO_CACHE_DIR/tmp" \
-  "$UFO_CACHE_DIR/torchinductor" \
-  "$UFO_CACHE_DIR/triton" \
-  "$UFO_CACHE_DIR/cuda" \
-  "$UFO_CACHE_DIR/warp"
+mkdir -p "$UFO_CACHE_DIR/uv" "$UFO_CACHE_DIR/pycache" "$UFO_CACHE_DIR/tmp"
 
-export BFMZERO_MJLAB_CACHE_DIR="${BFMZERO_MJLAB_CACHE_DIR:-$UFO_CACHE_DIR}"
 export UV_CACHE_DIR="${UV_CACHE_DIR:-$UFO_CACHE_DIR/uv}"
 export PYTHONPYCACHEPREFIX="${PYTHONPYCACHEPREFIX:-$UFO_CACHE_DIR/pycache}"
 export TMPDIR="${TMPDIR:-$UFO_CACHE_DIR/tmp}"
 export TEMP="${TEMP:-$TMPDIR}"
 export TMP="${TMP:-$TMPDIR}"
-export TORCHINDUCTOR_CACHE_DIR="${TORCHINDUCTOR_CACHE_DIR:-$UFO_CACHE_DIR/torchinductor}"
-export TRITON_CACHE_DIR="${TRITON_CACHE_DIR:-$UFO_CACHE_DIR/triton}"
-export CUDA_CACHE_PATH="${CUDA_CACHE_PATH:-$UFO_CACHE_DIR/cuda}"
-export WARP_CACHE_PATH="${WARP_CACHE_PATH:-$UFO_CACHE_DIR/warp}"
 export NCCL_NVLS_ENABLE="${NCCL_NVLS_ENABLE:-0}"
 
-exec uv run python -m humanoidverse.train "$@"
+if [[ -x "$(dirname "${BASH_SOURCE[0]}")/.venv/bin/python" ]]; then
+  exec "$(dirname "${BASH_SOURCE[0]}")/.venv/bin/python" -m ufo.train "$@"
+fi
+if command -v uv >/dev/null 2>&1; then
+  exec uv run python -m ufo.train "$@"
+fi
+printf '%s\n' 'Missing Python environment. Install uv and run uv sync --locked from the repository root.' >&2
+exit 1

@@ -8,8 +8,8 @@ DATASET_FILES=(
   "g1/lafan_29dof.pkl"
 )
 DESTS=(
-  "humanoidverse/data/lafan_29dof_10s-clipped.pkl"
-  "humanoidverse/data/lafan_29dof.pkl"
+  "ufo/data/lafan_29dof_10s-clipped.pkl"
+  "ufo/data/lafan_29dof.pkl"
 )
 EXPECTED_SHA256S=(
   "7f5aa36957808ee2e972472b18add8510533742710ba312d8b8c6e6014f1c010"

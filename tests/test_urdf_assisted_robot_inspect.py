@@ -1,16 +1,15 @@
 from __future__ import annotations
 
 import json
-import shutil
 import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
 
 from omegaconf import OmegaConf
 
-from humanoidverse.utils.robot_spec import load_robot_training_spec
-
+from ufo.tools.robot_config import load_robot_training_spec
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
@@ -124,7 +123,7 @@ def _write_robot_urdf(root: Path) -> Path:
 
 def _run_robot_inspect(args: list[str]) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
-        ["uv", "run", "python", "-m", "humanoidverse.tools.robot_inspect", *args],
+        [sys.executable, "-m", "ufo.tools.robot_inspect", *args],
         cwd=REPO_ROOT,
         text=True,
         capture_output=True,
@@ -134,87 +133,77 @@ def _run_robot_inspect(args: list[str]) -> subprocess.CompletedProcess[str]:
 
 class UrdfAssistedRobotInspectTest(unittest.TestCase):
     def test_urdf_enriches_training_draft_without_reordering_xml_layout(self) -> None:
-        hydra_dir = REPO_ROOT / "humanoidverse" / "config" / "robot" / "__tmp_urdf_assisted_test__"
-        if hydra_dir.exists():
-            shutil.rmtree(hydra_dir)
-        try:
-            with tempfile.TemporaryDirectory() as tmpdir:
-                root = Path(tmpdir)
-                xml_path = _write_robot_xml(root)
-                urdf_path = _write_robot_urdf(root)
-                map_path = root / "joint_map.json"
-                map_path.write_text(json.dumps({"right_knee_joint": "rknee_urdf"}))
-                robot_yaml = root / "tiny_urdf_assisted.yaml"
-                hydra_out = hydra_dir / "tiny_urdf_assisted_auto.yaml"
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            xml_path = _write_robot_xml(root)
+            urdf_path = _write_robot_urdf(root)
+            map_path = root / "joint_map.json"
+            map_path.write_text(json.dumps({"right_knee_joint": "rknee_urdf"}))
+            robot_yaml = root / "tiny_urdf_assisted.yaml"
 
-                result = _run_robot_inspect(
-                    [
-                        "--xml",
-                        str(xml_path),
-                        "--urdf",
-                        str(urdf_path),
-                        "--urdf-joint-name-map",
-                        str(map_path),
-                        "--name",
-                        "tiny_urdf_assisted",
-                        "--out",
-                        str(robot_yaml),
-                        "--hydra-out",
-                        str(hydra_out),
-                        "--force",
-                    ]
-                )
+            result = _run_robot_inspect(
+                [
+                    "--xml",
+                    str(xml_path),
+                    "--urdf",
+                    str(urdf_path),
+                    "--urdf-joint-name-map",
+                    str(map_path),
+                    "--name",
+                    "tiny_urdf_assisted",
+                    "--out",
+                    str(robot_yaml),
+                    "--with-training",
+                    "--force",
+                ]
+            )
 
-                self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
-                robot_config = OmegaConf.to_container(OmegaConf.load(robot_yaml), resolve=True)
-                hydra_config = OmegaConf.to_container(OmegaConf.load(hydra_out), resolve=True)
+            self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+            robot_config = OmegaConf.to_container(OmegaConf.load(robot_yaml), resolve=True)
 
-                control_joints = robot_config["control_joints"]["names"]
-                self.assertEqual(
-                    control_joints,
-                    [
-                        "right_hip_joint",
-                        "left_hip_joint",
-                        "right_knee_joint",
-                        "left_knee_joint",
-                        "right_ankle_joint",
-                        "left_ankle_joint",
-                    ],
-                )
+            control_joints = robot_config["control_joints"]["names"]
+            self.assertEqual(
+                control_joints,
+                [
+                    "right_hip_joint",
+                    "left_hip_joint",
+                    "right_knee_joint",
+                    "left_knee_joint",
+                    "right_ankle_joint",
+                    "left_ankle_joint",
+                ],
+            )
 
-                metadata = robot_config["metadata"]
-                self.assertEqual(metadata["merge_policy"]["source_of_truth"], "mujoco_xml")
-                self.assertIn("rknee_urdf", metadata["matched_urdf_joints"])
-                self.assertIn("left", metadata["semantic_hints"]["joints"]["left_hip_joint"])
-                self.assertIn("ankle", metadata["semantic_hints"]["links"]["left_ankle_roll_link"])
-                self.assertEqual(metadata["merge_policy"]["prefer_urdf_limits"], False)
-                self.assertTrue(any("keeping XML limits" in item for item in metadata["warnings"]))
+            metadata = robot_config["metadata"]
+            self.assertEqual(metadata["merge_policy"]["source_of_truth"], "mujoco_xml")
+            self.assertIn("rknee_urdf", metadata["matched_urdf_joints"])
+            self.assertIn("left", metadata["semantic_hints"]["joints"]["left_hip_joint"])
+            self.assertIn("ankle", metadata["semantic_hints"]["links"]["left_ankle_roll_link"])
+            self.assertEqual(metadata["merge_policy"]["prefer_urdf_limits"], False)
+            self.assertTrue(any("keeping XML limits" in item for item in metadata["warnings"]))
 
-                training = robot_config["training"]
-                self.assertEqual(training["control"]["effort_limit"], [240.0, 210.0, 250.0, 220.0, 260.0, 230.0])
-                self.assertEqual(training["control"]["velocity_limit"], [15.0, 12.0, 16.0, 13.0, 17.0, 14.0])
-                self.assertEqual(training["actuator"]["joints"]["right_knee_joint"]["friction"], 0.21)
-                self.assertEqual(training["actuator"]["joints"]["right_knee_joint"]["damping"], 1.1)
+            training = robot_config["training"]
+            self.assertEqual(training["control"]["effort_limit"], [240.0, 210.0, 250.0, 220.0, 260.0, 230.0])
+            self.assertEqual(training["control"]["velocity_limit"], [15.0, 12.0, 16.0, 13.0, 17.0, 14.0])
+            self.assertEqual(training["actuator"]["joints"]["right_knee_joint"]["friction"], 0.21)
+            self.assertEqual(training["actuator"]["joints"]["right_knee_joint"]["damping"], 1.1)
 
-                robot = hydra_config["robot"]
-                self.assertEqual(robot["dof_names"], control_joints)
-                self.assertEqual(robot["dof_pos_lower_limit_list"][1], -0.7)
-                self.assertEqual(robot["dof_pos_upper_limit_list"][1], 0.7)
-                self.assertEqual(robot["dof_pos_lower_limit_list"][5], -0.4)
-                self.assertEqual(robot["dof_pos_upper_limit_list"][5], 0.5)
-                self.assertEqual(robot["foot_name"], "ankle_roll_link")
-                self.assertEqual(robot["knee_name"], "knee_link")
-                self.assertFalse(robot["motion"]["motion_sym_loss"])
+            spec = load_robot_training_spec(robot_yaml)
+            from ufo.envs.config import MJLabEnvConfig, resolve_task_config
+            env = MJLabEnvConfig(motion_data_path="unused.pkl", robot_training=spec.to_env_dict())
+            robot = resolve_task_config(env, 1).robot
+            self.assertEqual(robot["dof_names"], control_joints)
+            self.assertEqual(robot["dof_pos_lower_limit_list"][1], -0.7)
+            self.assertEqual(robot["dof_pos_upper_limit_list"][1], 0.7)
+            self.assertEqual(robot["dof_pos_lower_limit_list"][5], -0.4)
+            self.assertEqual(robot["dof_pos_upper_limit_list"][5], 0.5)
 
-                symmetry = robot["metadata"]["symmetric_dofs_idx_draft"]
-                self.assertIn(["left_hip_joint", "right_hip_joint"], symmetry["pairs"])
-                self.assertIn([1, 0], symmetry["index_pairs"])
+            symmetry = metadata["symmetric_dofs_idx_draft"]
+            self.assertIn(["left_hip_joint", "right_hip_joint"], symmetry["pairs"])
+            self.assertIn([1, 0], symmetry["index_pairs"])
 
-                spec = load_robot_training_spec(robot_yaml)
-                self.assertEqual(spec.robot.control_joint_names, control_joints)
-        finally:
-            if hydra_dir.exists():
-                shutil.rmtree(hydra_dir)
+            spec = load_robot_training_spec(robot_yaml)
+            self.assertEqual(spec.robot.control_joint_names, control_joints)
 
     def test_xml_only_output_does_not_include_urdf_metadata(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -231,8 +220,6 @@ class UrdfAssistedRobotInspectTest(unittest.TestCase):
                     "--out",
                     str(robot_yaml),
                     "--with-training",
-                    "--hydra-robot",
-                    "tiny/tiny_xml_only_auto",
                 ]
             )
 
@@ -240,9 +227,7 @@ class UrdfAssistedRobotInspectTest(unittest.TestCase):
             robot_config = OmegaConf.to_container(OmegaConf.load(robot_yaml), resolve=True)
             self.assertNotIn("urdf_source", robot_config["metadata"])
             self.assertNotIn("merge_policy", robot_config["metadata"])
-            self.assertTrue(
-                any("symmetric_dofs_idx was not generated" in item for item in robot_config["metadata"]["warnings"])
-            )
+            self.assertTrue(any("symmetric_dofs_idx was not generated" in item for item in robot_config["metadata"]["warnings"]))
             self.assertEqual(robot_config["training"]["control"]["velocity_limit"], [20.0] * 6)
 
 

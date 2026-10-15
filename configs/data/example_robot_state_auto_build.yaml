@@ -3,7 +3,7 @@ robot_config: configs/robots/g1_29dof.yaml
 datasets:
   - name: g1_robot_state_sample
     format: robot_state_csv
-    source_path: humanoidverse/data/examples/g1_robot_state_sample.csv
+    source_path: ufo/data/examples/g1_robot_state_sample.csv
     weight: 1.0
     fps: 50
     columns:
