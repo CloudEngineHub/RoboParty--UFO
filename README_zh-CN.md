@@ -22,7 +22,7 @@ UFO 是基于 **mjlab** 的人形机器人无监督强化学习框架，支持 *
 
 **RP1 的 TeCH 策略尚未进行真机测试。**
 
-**G1 和 RP1 的最终训练数据也将开源，发布后会在这里补充下载入口。**
+**[G1／RP1 训练数据](https://huggingface.co/datasets/xuewang/UFO-MotionData)和[已完成真机测试的 G1 FB policy](https://huggingface.co/xuewang/ufo-g1-policy)已发布。**
 
 ## 安装
 
@@ -40,15 +40,16 @@ uv sync --locked
 
 ## 准备数据
 
-现有 G1 LaFAN 训练数据可通过以下命令下载：
+下载对应机器人的完整动作和训练片段，脚本会校验 SHA256：
 
 ```bash
 bash scripts/download_data.sh g1_lafan
+bash scripts/download_data.sh rp1_lafan
 ```
 
-RP1 暂需自行准备原始 LaFAN v7 NPZ 文件，按 [RP1 数据导入说明](docs/ROBOT_ADAPTATION.md#rp1-data-import) 转换。每个机器人需要匹配的动作数据，G1 数据不能直接用于 RP1。
+G1 包含 40 条动作；RP1 包含 55 条动作，50 Hz、24 个关节，切分为 1,166 个训练片段。每个机器人需要匹配的动作数据，G1 数据不能直接用于 RP1。
 
-已有转换后的数据或无法访问 Hugging Face 时，见[本地数据放置说明](docs/ROBOT_ADAPTATION.md#use-converted-data)。RP1 数据准备完成后才能启动训练。
+已有文件时，见[本地数据放置说明](docs/ROBOT_ADAPTATION.md#use-converted-data)。自行转换 RP1 NPZ 文件时，见 [RP1 数据导入说明](docs/ROBOT_ADAPTATION.md#rp1-data-import)。
 
 ## 训练
 
@@ -88,12 +89,23 @@ WANDB_PROJECT=UFO ./run_train.sh --robot g1 --agent fb --gpu-ids all \
 
 完整参数见 `./run_inference.sh <tracking|reward|goal> --help`。
 
+[已发布的 G1 FB 模型](https://huggingface.co/xuewang/ufo-g1-policy)包含约 1.92 亿步的 checkpoint、ONNX，以及配套的 tracking、goal、向前行走 reward z。下载到 `model/` 后可直接运行：
+
+```bash
+uv run hf download xuewang/ufo-g1-policy --local-dir model
+./run_inference.sh tracking --model-folder model/g1_policy \
+  --data-path ufo/data/lafan_29dof.pkl --motion-list 7 --save-mp4
+```
+
+发布包包含模型权重，不含优化器状态和 replay buffer。重新计算其他 reward z 需要自行保存的 replay；包内 reward z 可直接用于部署。
+
 ## 更多文档
 
 - [训练与推理](docs/TRAIN_INFERENCE.md)：默认配置、评估、checkpoint 和推理参数。
 - [机器人与数据适配](docs/ROBOT_ADAPTATION.md)：通过 `robot_setup` 添加机器人、导入已重定向的动作数据。
 - [代码结构](docs/ARCHITECTURE.md)：目录与模块职责。
-- [真机部署](https://github.com/Roboparty/UFO/tree/deploy)。
+- [G1 真机部署](https://github.com/Roboparty/UFO/tree/deploy)。
+- **RP1 的 UFO 部署请见 [Roboparty/roboparty_deploy](https://github.com/Roboparty/roboparty_deploy)。**
 
 ## 引用与许可
 

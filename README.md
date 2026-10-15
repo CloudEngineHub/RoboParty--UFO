@@ -22,7 +22,7 @@ UFO is an unsupervised reinforcement learning framework for humanoid control, bu
 
 **The RP1 TeCH policy has not been tested on the physical robot.**
 
-**The final training datasets for G1 and RP1 will also be open-sourced. Download links will be added here when released.**
+**[G1 / RP1 training data](https://huggingface.co/datasets/xuewang/UFO-MotionData) and the [G1 FB policy tested on hardware](https://huggingface.co/xuewang/ufo-g1-policy) are available.**
 
 ## Install
 
@@ -40,15 +40,16 @@ This guide requires the mjlab checkout containing `ufo/` and `run_inference.sh`;
 
 ## Prepare data
 
-The existing G1 LaFAN training data can be downloaded with:
+Download matching full motions and training clips; the script verifies SHA256:
 
 ```bash
 bash scripts/download_data.sh g1_lafan
+bash scripts/download_data.sh rp1_lafan
 ```
 
-For RP1, import your original LaFAN v7 NPZ files using the [RP1 data import instructions](docs/ROBOT_ADAPTATION.md#rp1-data-import). Each robot requires matching motion data; G1 data cannot be used directly for RP1.
+G1 contains 40 motions. RP1 contains 55 motions at 50 Hz, converted for its 24 controlled joints, with 1,166 training clips. Each robot requires matching data; G1 data cannot be used directly for RP1.
 
-Already have converted data, or cannot access Hugging Face? See [local data paths](docs/ROBOT_ADAPTATION.md#use-converted-data). RP1 cannot be trained until its matching data is available.
+For local files, see [data paths](docs/ROBOT_ADAPTATION.md#use-converted-data). To convert your own RP1 NPZ files, see [RP1 data import](docs/ROBOT_ADAPTATION.md#rp1-data-import).
 
 ## Train
 
@@ -88,12 +89,23 @@ Inference reads robot settings from the saved run. Use a checkpoint trained for 
 
 See `./run_inference.sh <tracking|reward|goal> --help` for options.
 
+The [released G1 FB model](https://huggingface.co/xuewang/ufo-g1-policy) includes the approximately 192M-step checkpoint, ONNX exports and matching tracking, goal and forward-walking z. Download it into `model/`:
+
+```bash
+uv run hf download xuewang/ufo-g1-policy --local-dir model
+./run_inference.sh tracking --model-folder model/g1_policy \
+  --data-path ufo/data/lafan_29dof.pkl --motion-list 7 --save-mp4
+```
+
+The download includes model weights, but no optimizer state or replay buffer. Computing new reward z requires your own saved replay; the provided reward z is ready for deployment.
+
 ## Documentation
 
 - [Training and inference](docs/TRAIN_INFERENCE.md): defaults, evaluation, checkpoints and inference options.
 - [Robot and data adaptation](docs/ROBOT_ADAPTATION.md): add robots with `robot_setup` and import retargeted motions.
 - [Architecture](docs/ARCHITECTURE.md): code layout and component responsibilities.
-- [Real-robot deployment](https://github.com/Roboparty/UFO/tree/deploy).
+- [G1 real-robot deployment](https://github.com/Roboparty/UFO/tree/deploy).
+- **RP1 UFO deployment:** [Roboparty/roboparty_deploy](https://github.com/Roboparty/roboparty_deploy).
 
 ## Citation and license
 

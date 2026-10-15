@@ -132,11 +132,15 @@ The default commands look for these files relative to the repository root:
 Copy or symlink your matching files to these paths. Alternatively, pass their
 actual paths with `--data-path` when training or running inference. Keep full
 motions for goal definitions: motion IDs and frame indices differ from clips.
-The G1 downloader verifies existing files by SHA256 and skips downloading
+Run `bash scripts/download_data.sh g1_lafan` or
+`bash scripts/download_data.sh rp1_lafan` to download the released files from
+[UFO-MotionData](https://huggingface.co/datasets/xuewang/UFO-MotionData).
+The downloader verifies existing files by SHA256 and skips downloading
 verified copies. If Hugging Face is unreachable, obtain the same files on a
 machine with access and copy them here; the downloader cannot bypass a network
-block. The final G1/RP1 data releases are pending; the RP1 import command below
-requires you to already have the original NPZ dataset and manifest.
+block. The RP1 release contains 55 full motions and 1,166 training clips at
+50 Hz. The optional import command below is for converting your own original
+NPZ dataset and manifest.
 
 ## RP1 data import
 

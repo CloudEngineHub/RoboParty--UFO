@@ -18,12 +18,12 @@ EXPECTED_SHA256S=(
 
 usage() {
   cat <<USAGE
-Usage: bash scripts/download_data.sh [g1_lafan]
+Usage: bash scripts/download_data.sh [g1_lafan|rp1_lafan]
 
-Downloads the default G1 LaFAN training motion data from Hugging Face:
+Downloads full motions and 10-second training clips from Hugging Face:
   https://huggingface.co/datasets/${DATASET_REPO}
-  ${DATASET_FILES[0]}
-  ${DATASET_FILES[1]}
+  g1_lafan:  G1 29-DoF, 40 motions
+  rp1_lafan: RP1.3 24-DoF, 55 motions
 
 Environment overrides:
   UFO_DATASET_REPO=${DATASET_REPO}
@@ -33,6 +33,20 @@ USAGE
 
 case "${1:-g1_lafan}" in
   g1_lafan|lafan|g1)
+    ;;
+  rp1_lafan|rp1)
+    DATASET_FILES=(
+      "rp1/rp1_24dof_lafan_v7.pkl"
+      "rp1/rp1_24dof_lafan_v7_10s-clipped.pkl"
+    )
+    DESTS=(
+      "ufo/data/rp1_24dof_lafan_v7.pkl"
+      "ufo/data/rp1_24dof_lafan_v7_10s-clipped.pkl"
+    )
+    EXPECTED_SHA256S=(
+      "5cf6c98c298ad148b9182dc8dda5701a73224653325beee7e5ccb38f7eb0b75c"
+      "c6587383d5888782f0dc8ff55b2ce2fd28e22008cd69fd8534e826a38aa4bc1b"
+    )
     ;;
   -h|--help|help)
     usage
