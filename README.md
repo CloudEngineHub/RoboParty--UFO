@@ -24,6 +24,18 @@ UFO is an unsupervised reinforcement learning framework for humanoid control, bu
 
 **[G1 / RP1 training data](https://huggingface.co/datasets/xuewang/UFO-MotionData) and the [G1 FB policy tested on hardware](https://huggingface.co/xuewang/ufo-g1-policy) are available.**
 
+## News
+
+**2026-10-15 — Unified mjlab release**
+
+- **Simpler framework, two robots:** replaced the legacy `humanoidverse` layout with `ufo`, with unified G1 / RP1 and FB / TeCH training commands.
+- **More efficient training:** evaluation across all GPUs, compiled network forwards, fused Adam, bucketed gradient synchronization, and separate model/replay save schedules.
+- **Updated FB defaults:** 1024-wide networks with a shared critic trunk; independent critics remain available via `--no-shared-critic`.
+- **Correctness fixes:** preserve true final observations across resets, correct contact-force direction, and align reference and simulator observation scaling.
+- **Deployment exports:** ONNX exports include joint order, observation scales, history order, motor gains and action scales. RP1 training data and a G1 FB policy tested on hardware are now available through the links above.
+
+See [architecture](docs/ARCHITECTURE.md) and [training/inference](docs/TRAIN_INFERENCE.md) for details.
+
 ## Install
 
 Requires Linux and an NVIDIA driver compatible with CUDA 12.8. The lockfile selects PyTorch 2.7.1 / CUDA 12.8 and NCCL 2.26.5, including Blackwell support. Run these commands, then work from the repository root:

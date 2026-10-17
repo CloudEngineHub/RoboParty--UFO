@@ -24,6 +24,18 @@ UFO 是基于 **mjlab** 的人形机器人无监督强化学习框架，支持 *
 
 **[G1／RP1 训练数据](https://huggingface.co/datasets/xuewang/UFO-MotionData)和[已完成真机测试的 G1 FB policy](https://huggingface.co/xuewang/ufo-g1-policy)已发布。**
 
+## News
+
+**2026-10-15 — 统一 mjlab 框架发布**
+
+- **框架精简、双机器人支持**：将旧 `humanoidverse` 结构整理为 `ufo`，统一 G1／RP1、FB／TeCH 的训练命令。
+- **训练效率优化**：所有 GPU 分担评估，启用网络前向编译、fused Adam、梯度分桶同步，模型与 replay 分开周期保存。
+- **更新 FB 默认网络**：采用 1024 宽度和共享 critic 主干，仍可通过 `--no-shared-critic` 使用独立 critic。
+- **正确性修复**：保留 reset 前的真实末态观测，修正接触力方向，统一参考动作与仿真观测的缩放。
+- **部署导出完善**：ONNX 配套导出关节顺序、观测缩放、历史顺序、电机增益和动作缩放；RP1 训练数据及已完成真机测试的 G1 FB policy 已通过上方链接发布。
+
+详见[代码结构](docs/ARCHITECTURE.md)和[训练与推理](docs/TRAIN_INFERENCE.md)。
+
 ## 安装
 
 需要 Linux 和兼容 CUDA 12.8 的 NVIDIA 驱动。锁文件固定 PyTorch 2.7.1 / CUDA 12.8 和 NCCL 2.26.5，支持 Blackwell 显卡。执行以下命令，后续操作均在仓库根目录进行：
