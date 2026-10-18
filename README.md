@@ -33,7 +33,8 @@ UFO is an unsupervised reinforcement learning framework for humanoid control, bu
 | Experiment | Global training FPS | Last EMD ↓ | Time to 192M steps |
 | --- | ---: | ---: | ---: |
 | G1: original DR + original reward | **12,440** | **0.6655** | **4 h 45 min** |
-| G1: PBFM DR + original reward | **12,467** | **0.7406** | **≈4 h 51 min** |
+| G1: extended DR + original reward | **12,467** | **0.7406** | **≈4 h 51 min** |
+| G1: extended DR + updated reward | **12,217** | **0.7554** | **4 h 55 min** |
 | RP1: baseline | **12,485** | **0.7139** | **4 h 48 min** |
 
 <details>
@@ -41,9 +42,9 @@ UFO is an unsupervised reinforcement learning framework for humanoid control, bu
 
 All runs use 1,024 environments and batch size 1,024 per GPU, six residual layers, and 16 agent updates per rollout step. FPS counts environment transitions across all eight GPUs and is the median of the last 20 logged intervals, not whole-job throughput.
 
-Both G1 runs use LaFAN-40 and 30% lying-down initialization. The original-DR run predates the reset-boundary fix; the PBFM-DR run includes it, so this is not a controlled DR-only comparison. RP1 uses common LaFAN-40 and no lying-down initialization. BF16 is an experiment override for G1; the current G1 FB default remains FP32 + TF32, while RP1 FB defaults to BF16.
+All three G1 runs use LaFAN-40 and 30% lying-down initialization. The original-DR run predates the reset-boundary fix; the extended-DR/original-reward run includes it. These historical runs span code changes and are not a controlled DR/reward ablation. The updated reward replaces the undesired-contact penalty with a body-impact penalty, sets the slip penalty weight to -4, and adds a foot-stumble penalty with weight -2. RP1 uses common LaFAN-40 and no lying-down initialization. BF16 is an experiment override for G1; the current G1 FB default remains FP32 + TF32, while RP1 FB defaults to BF16.
 
-EMD is the mean over the last periodic tracking evaluation: both G1 runs at 188,981,248 steps (862 clips), RP1 at 190,054,400 steps (902 clips), rather than a new evaluation of the final checkpoint. Wall time includes startup, evaluation and checkpoint saving. The G1 original-DR and RP1 times use launcher start/end records; the G1 PBFM-DR time is estimated from launch to the completed final save because its launcher completion timestamp is unavailable. All runs completed 191,995,904 steps under the nominal 192M budget.
+EMD is the mean over the last periodic tracking evaluation: all three G1 runs at 188,981,248 steps (862 clips), RP1 at 190,054,400 steps (902 clips), rather than a new evaluation of the final checkpoint. Wall time includes startup, evaluation and checkpoint saving. Times use launcher start/end records, except for G1 extended DR + original reward: its time is estimated from launch to the completed final save because its launcher completion timestamp is unavailable. All runs completed 191,995,904 steps under the nominal 192M budget.
 
 </details>
 
