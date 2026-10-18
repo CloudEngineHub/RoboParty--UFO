@@ -30,12 +30,12 @@ UFO is an unsupervised reinforcement learning framework for humanoid control, bu
 
 Recorded **FB / mjlab** results, with GPU count and precision shown explicitly:
 
-| Experiment | GPUs | Precision | Network width / critics | Global training FPS |
-| --- | --- | --- | --- | ---: |
-| G1: compiled forwards + fused Adam | 8 × NVIDIA H200 | FP32 + TF32 | 2048 / independent | **6,423 → 7,579 (+18.0%)** |
-| G1: batched contact reads, normalizer synchronization and metric accumulation | 8 × NVIDIA H200 | FP32 + TF32 | 1024 / shared | **13,565 → 14,103 (+4.0%)** |
-| G1: completed 192M-step training | 8 × NVIDIA H20 | BF16 mixed precision | 1024 / shared | **12,467** |
-| RP1: completed 192M-step training | 8 × NVIDIA H20 | BF16 mixed precision | 1024 / shared | **12,485** |
+| Experiment | GPUs | Precision | Network width / critics | Global training FPS | Last EMD ↓ | Time to 192M steps |
+| --- | --- | --- | --- | ---: | ---: | ---: |
+| G1: compiled forwards + fused Adam | 8 × NVIDIA H200 | FP32 + TF32 | 2048 / independent | **6,423 → 7,579 (+18.0%)** | — | — |
+| G1: batched contact reads, normalizer synchronization and metric accumulation | 8 × NVIDIA H200 | FP32 + TF32 | 1024 / shared | **13,565 → 14,103 (+4.0%)** | — | — |
+| G1: completed 192M-step training | 8 × NVIDIA H20 | BF16 mixed precision | 1024 / shared | **12,467** | **0.7406** | **≈4 h 51 min** |
+| RP1: completed 192M-step training | 8 × NVIDIA H20 | BF16 mixed precision | 1024 / shared | **12,485** | **0.7139** | **4 h 48 min** |
 
 <details>
 <summary>Measurement settings and scope</summary>
@@ -45,6 +45,8 @@ All rows use 1,024 environments and batch size 1,024 per GPU, with 16 agent upda
 The H200 rows are separate matched short benchmarks recorded on September 28 and 30, 2026, with mjlab 1.6.0 / PyTorch 2.7.1+cu126 and G1 LaFAN-40 (862 clips). They exclude startup, evaluation and checkpoint intervals; gains are not additive. FP32 + TF32 means FP32 parameters/storage with TF32-enabled matrix multiplication, without BF16 autocast. These throughput measurements do not establish equal final policy quality.
 
 H20 values are the median of the last 20 logged FPS intervals, not whole-job throughput. Both runs use 1024-wide networks with six residual layers and shared critics: G1 uses LaFAN-40, PBFM DR, the earlier reward preset and 30% lying-down initialization; RP1 uses common LaFAN-40 and no lying-down initialization. BF16 is an experiment override for G1; the current G1 FB default remains FP32 + TF32, while RP1 FB defaults to BF16.
+
+EMD is the mean over the last periodic tracking evaluation: G1 at 188,981,248 steps (862 clips), RP1 at 190,054,400 steps (902 clips), rather than a new evaluation of the final checkpoint. Wall time includes startup, evaluation and checkpoint saving. RP1 uses launcher start/end times; G1 is estimated from launch to the completed final save because its launcher completion timestamp is unavailable. Both completed 191,995,904 steps under the nominal 192M budget. The H200 short benchmarks did not run to 192M, so their final EMD and completion time are not reported.
 
 </details>
 
