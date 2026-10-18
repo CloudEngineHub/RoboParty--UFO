@@ -26,15 +26,29 @@ UFO 是基于 **mjlab** 的人形机器人无监督强化学习框架，支持 *
 
 ## News
 
-**2026-10-15 — 统一 mjlab 框架发布**
+**2026-10-15 — 训练性能与双机器人支持更新**
 
-- **框架精简、双机器人支持**：将旧 `humanoidverse` 结构整理为 `ufo`，统一 G1／RP1、FB／TeCH 的训练命令。
-- **训练效率优化**：所有 GPU 分担评估，启用网络前向编译、fused Adam、梯度分桶同步，模型与 replay 分开周期保存。
-- **更新 FB 默认网络**：采用 1024 宽度和共享 critic 主干，仍可通过 `--no-shared-critic` 使用独立 critic。
-- **正确性修复**：保留 reset 前的真实末态观测，修正接触力方向，统一参考动作与仿真观测的缩放。
-- **部署导出完善**：ONNX 配套导出关节顺序、观测缩放、历史顺序、电机增益和动作缩放；RP1 训练数据及已完成真机测试的 G1 FB policy 已通过上方链接发布。
+以下为 **FB / mjlab** 的历史实测，明确列出 GPU 数量与精度：
 
-详见[代码结构](docs/ARCHITECTURE.md)和[训练与推理](docs/TRAIN_INFERENCE.md)。
+| 实验 | GPU | 精度 | 网络宽度／critic | 全卡训练 FPS |
+| --- | --- | --- | --- | ---: |
+| G1：网络前向编译＋fused Adam | 8 × NVIDIA H200 | FP32＋TF32 | 2048／独立 | **6,423 → 7,579（+18.0%）** |
+| G1：批量接触力读取、归一化状态同步与指标累加优化 | 8 × NVIDIA H200 | FP32＋TF32 | 1024／共享 | **13,565 → 14,103（+4.0%）** |
+| G1：完成 1.92 亿步训练 | 8 × NVIDIA H20 | BF16 混合精度 | 1024／共享 | **12,467** |
+| RP1：完成 1.92 亿步训练 | 8 × NVIDIA H20 | BF16 混合精度 | 1024／共享 | **12,485** |
+
+<details>
+<summary>测速配置与统计口径</summary>
+
+各组均为每卡 1,024 个环境、batch size 1,024，每次 rollout step 执行 16 次 agent 更新。FPS 表示八张卡合计的环境 transition 数／秒。
+
+H200 两行分别来自 2026 年 9 月 28 日和 30 日的同配置短测，使用 mjlab 1.6.0／PyTorch 2.7.1+cu126、G1 LaFAN-40（862 个片段）。统计排除启动、评估和 checkpoint 保存区间；两组提升不可叠加。FP32＋TF32 指参数与存储保持 FP32、矩阵乘允许 TF32，未启用 BF16 autocast。吞吐提升不代表最终策略效果已经证明等价。
+
+H20 数值取最后 20 条 FPS 日志的中位数，不代表包含全部开销的整场平均速度。两组均采用 1024 宽度、六层残差主干和共享 critic：G1 使用 LaFAN-40、PBFM DR、之前的 reward 配置及 30% 躺倒初始化；RP1 使用共同 LaFAN-40、关闭躺倒初始化。G1 的 BF16 为实验覆盖设置，当前 G1 FB 默认仍为 FP32＋TF32，RP1 FB 默认 BF16。
+
+</details>
+
+本次发布还将旧 `humanoidverse` 结构整理为 `ufo`，统一 G1／RP1、FB／TeCH 命令，修复 reset 边界观测与接触力方向，并提供机器人配置感知的 ONNX 导出、RP1 数据及已完成真机测试的 G1 policy。详见[代码结构](docs/ARCHITECTURE.md)和[训练与推理](docs/TRAIN_INFERENCE.md)。
 
 ## 安装
 

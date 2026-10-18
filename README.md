@@ -26,15 +26,29 @@ UFO is an unsupervised reinforcement learning framework for humanoid control, bu
 
 ## News
 
-**2026-10-15 — Unified mjlab release**
+**2026-10-15 — Training performance and multi-robot update**
 
-- **Simpler framework, two robots:** replaced the legacy `humanoidverse` layout with `ufo`, with unified G1 / RP1 and FB / TeCH training commands.
-- **More efficient training:** evaluation across all GPUs, compiled network forwards, fused Adam, bucketed gradient synchronization, and separate model/replay save schedules.
-- **Updated FB defaults:** 1024-wide networks with a shared critic trunk; independent critics remain available via `--no-shared-critic`.
-- **Correctness fixes:** preserve true final observations across resets, correct contact-force direction, and align reference and simulator observation scaling.
-- **Deployment exports:** ONNX exports include joint order, observation scales, history order, motor gains and action scales. RP1 training data and a G1 FB policy tested on hardware are now available through the links above.
+Recorded **FB / mjlab** results, with GPU count and precision shown explicitly:
 
-See [architecture](docs/ARCHITECTURE.md) and [training/inference](docs/TRAIN_INFERENCE.md) for details.
+| Experiment | GPUs | Precision | Network width / critics | Global training FPS |
+| --- | --- | --- | --- | ---: |
+| G1: compiled forwards + fused Adam | 8 × NVIDIA H200 | FP32 + TF32 | 2048 / independent | **6,423 → 7,579 (+18.0%)** |
+| G1: batched contact reads, normalizer synchronization and metric accumulation | 8 × NVIDIA H200 | FP32 + TF32 | 1024 / shared | **13,565 → 14,103 (+4.0%)** |
+| G1: completed 192M-step training | 8 × NVIDIA H20 | BF16 mixed precision | 1024 / shared | **12,467** |
+| RP1: completed 192M-step training | 8 × NVIDIA H20 | BF16 mixed precision | 1024 / shared | **12,485** |
+
+<details>
+<summary>Measurement settings and scope</summary>
+
+All rows use 1,024 environments and batch size 1,024 per GPU, with 16 agent updates per rollout step. FPS counts environment transitions across all eight GPUs.
+
+The H200 rows are separate matched short benchmarks recorded on September 28 and 30, 2026, with mjlab 1.6.0 / PyTorch 2.7.1+cu126 and G1 LaFAN-40 (862 clips). They exclude startup, evaluation and checkpoint intervals; gains are not additive. FP32 + TF32 means FP32 parameters/storage with TF32-enabled matrix multiplication, without BF16 autocast. These throughput measurements do not establish equal final policy quality.
+
+H20 values are the median of the last 20 logged FPS intervals, not whole-job throughput. Both runs use 1024-wide networks with six residual layers and shared critics: G1 uses LaFAN-40, PBFM DR, the earlier reward preset and 30% lying-down initialization; RP1 uses common LaFAN-40 and no lying-down initialization. BF16 is an experiment override for G1; the current G1 FB default remains FP32 + TF32, while RP1 FB defaults to BF16.
+
+</details>
+
+The release also replaces the legacy `humanoidverse` layout with `ufo`, unifies G1 / RP1 and FB / TeCH commands, fixes reset-boundary observations and contact-force direction, and provides robot-aware ONNX exports, RP1 data and a G1 policy tested on hardware. See [architecture](docs/ARCHITECTURE.md) and [training/inference](docs/TRAIN_INFERENCE.md).
 
 ## Install
 
