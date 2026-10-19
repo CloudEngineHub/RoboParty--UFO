@@ -309,7 +309,7 @@ class MJLabCore:
         ).view(self.num_envs, -1, 4)
         extend_ang_vel = self.body_ang_vel[:, self.extend_body_parent_ids]
         extend_vel = self.body_vel[:, self.extend_body_parent_ids] + torch.cross(
-            extend_ang_vel, self.extend_body_pos_in_parent.view(self.num_envs, -1, 3), dim=2
+            extend_ang_vel, rotated_pos, dim=2
         )
         return (
             torch.cat([self.body_pos, extend_pos], dim=1),

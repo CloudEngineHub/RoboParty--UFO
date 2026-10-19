@@ -11,6 +11,42 @@ from ufo.envs.observations import ObservationHistory
 from ufo.envs.rewards import combine_rewards
 
 
+def test_extended_body_velocity_matches_world_position_derivative():
+    core = MJLabCore.__new__(MJLabCore)
+    core.num_envs, core.num_extend_bodies = 4, 2
+    core.extend_body_parent_ids = torch.tensor([1, 0])
+    core.extend_body_pos_in_parent = torch.tensor([[0.0, 0.0, 0.35], [0.0, 0.0, 0.0]], dtype=torch.float64).repeat(4, 1, 1)
+    core.extend_body_rot_in_parent_xyzw = torch.tensor([0.0, 0.0, 0.0, 1.0], dtype=torch.float64).repeat(4, 2, 1)
+    positions = torch.zeros(4, 2, 3, dtype=torch.float64)
+    core.body_vel = torch.tensor([[-1.0, -2.0, -3.0], [0.1, 0.2, 0.3]], dtype=torch.float64).repeat(4, 1, 1)
+    core.body_ang_vel = torch.zeros_like(core.body_vel)
+    speeds = torch.tensor([1.0, 1.0, 2.0, 0.0], dtype=torch.float64)
+    core.body_ang_vel[:, 1, 1] = speeds
+    angles = torch.tensor([0.0, torch.pi / 2, -torch.pi / 2, torch.pi], dtype=torch.float64)
+
+    def at_time(time):
+        core.body_pos = positions + time * core.body_vel
+        core.body_rot = core.extend_body_rot_in_parent_xyzw.clone()
+        angle = angles + time * speeds
+        core.body_rot[:, 1, 1] = torch.sin(angle / 2)
+        core.body_rot[:, 1, 3] = torch.cos(angle / 2)
+        return core._extend_body_state()
+
+    body_pos, _, body_vel, body_ang_vel = at_time(0.0)
+    expected = core.body_vel[:, 1] + torch.tensor(
+        [[0.35, 0.0, 0.0], [0.0, 0.0, -0.35], [0.0, 0.0, 0.7], [0.0, 0.0, 0.0]], dtype=torch.float64
+    )
+    torch.testing.assert_close(body_vel[:, 2], expected, atol=1e-10, rtol=1e-10)
+    # An extension at its parent's origin inherits that parent's velocity.
+    torch.testing.assert_close(body_vel[:, 3], core.body_vel[:, 0])
+    torch.testing.assert_close(body_vel[:, :2], core.body_vel)
+    torch.testing.assert_close(body_ang_vel[:, 2:], core.body_ang_vel[:, core.extend_body_parent_ids])
+    torch.testing.assert_close(body_pos[1, 2], torch.tensor([0.35, 0.0, 0.0], dtype=torch.float64), atol=1e-10, rtol=1e-10)
+    dt = 1e-5
+    finite_difference = (at_time(dt)[0] - at_time(-dt)[0]) / (2 * dt)
+    torch.testing.assert_close(body_vel, finite_difference, atol=1e-8, rtol=1e-8)
+
+
 @pytest.mark.parametrize("enabled,length,initial,expected", [
     (False, 10, 0.5, 0.5), (True, 10, 0.5, 0.45), (True, 41, 0.5, 0.5),
     (True, 50, 0.5, 0.55), (True, 50, 1.0, 1.0), (True, 10, 0.1, 0.1),
