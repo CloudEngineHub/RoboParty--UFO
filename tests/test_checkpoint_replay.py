@@ -209,6 +209,21 @@ def _distributed_worker(rank, root, rendezvous):
             _assert_empty_resume(ws)
             dist.barrier()
 
+        ws = make_workspace(root / "failed_rank", rank, 2)
+        buffer = make_buffer(rank)
+        save(ws, buffer, "all")
+        original_save = buffer.save
+        if rank == 1:
+            def fail(*args, **kwargs):
+                raise OSError("injected rank-1 replay failure")
+            buffer.save = fail
+        with pytest.raises(RuntimeError, match="Checkpoint save failed"):
+            save(ws, buffer, "all", local_time=22)
+        buffer.save = original_save
+        assert len(reload_buffers(ws)) == len(buffer)
+        assert ws._checkpoint_global_time == 40
+        dist.barrier()
+
         _distributed_train_gate(rank, root / "gate")
         _distributed_train_gate(rank, root / "planned_stop", planned_stop=True)
     finally:
@@ -284,7 +299,7 @@ def test_single_rank_inference_snapshot_is_a_complete_resume(tmp_path):
 
 
 @pytest.mark.parametrize("existing_checkpoint", [False, True])
-def test_failed_model_write_cannot_be_loaded_as_a_checkpoint(tmp_path, existing_checkpoint):
+def test_failed_model_write_preserves_previous_checkpoint(tmp_path, existing_checkpoint):
     ws = make_workspace(tmp_path)
     status_path = tmp_path / "checkpoint" / "train_status.json"
     if existing_checkpoint:
@@ -296,13 +311,16 @@ def test_failed_model_write_cannot_be_loaded_as_a_checkpoint(tmp_path, existing_
         raise OSError("injected disk failure")
 
     ws.agent.save = fail
-    with pytest.raises(OSError, match="injected disk failure"):
+    with pytest.raises(RuntimeError, match="injected disk failure"):
         save(ws, make_buffer(), "none", local_time=22)
     checkpoint = tmp_path / "checkpoint"
-    assert (checkpoint / ".saving").exists()
+    assert not (checkpoint / ".saving").exists()
     assert (status_path.read_bytes() if status_path.exists() else None) == old_status
-    with pytest.raises(RuntimeError, match="(?i)(incomplete|unfinished|interrupted|saving)"):
-        trainer.create_agent_or_load_checkpoint(tmp_path, ws.cfg, {})
+    _, status = trainer.create_agent_or_load_checkpoint(tmp_path, ws.cfg, {})
+    assert status["local_time"] == (20 if existing_checkpoint else 0)
+    assert not list(tmp_path.glob(".checkpoint-*.tmp"))
+    if existing_checkpoint:
+        assert len(reload_buffers(ws)) == 5
 
 
 def test_readiness_requires_a_valid_transition_and_does_not_consume_rng():
@@ -346,4 +364,87 @@ def test_inference_rejects_incomplete_model_save(tmp_path, during_load):
         (tmp_path / ".saving").touch()
     with patch.object(FBcprAuxModel, "load", side_effect=load):
         with pytest.raises(RuntimeError, match="(?i)(incomplete|save started)"):
+            load_model_from_checkpoint_dir(tmp_path)
+
+
+@pytest.mark.parametrize("failure", ["replay", "promotion"])
+def test_failed_snapshot_preserves_model_and_replay(tmp_path, failure):
+    ws = make_workspace(tmp_path)
+    buffer = make_buffer()
+    save(ws, buffer, "all")
+    old = {p.relative_to(tmp_path): p.read_bytes() for p in (tmp_path / "checkpoint").rglob("*") if p.is_file()}
+    buffer.extend(row(99))
+    if failure == "replay":
+        def fail(path):
+            Path(path).mkdir(parents=True, exist_ok=True)
+            (Path(path) / "buffer.hdf5").write_bytes(b"partial")
+            raise OSError("injected replay failure")
+        context = patch.object(buffer, "save", side_effect=fail)
+    else:
+        rename = Path.rename
+        def fail(path, target):
+            if path.name.startswith(".checkpoint-"):
+                raise OSError("injected promotion failure")
+            return rename(path, target)
+        context = patch.object(Path, "rename", fail)
+    with context, pytest.raises(RuntimeError, match="injected"):
+        save(ws, buffer, "all", local_time=22)
+    assert old == {p.relative_to(tmp_path): p.read_bytes() for p in (tmp_path / "checkpoint").rglob("*") if p.is_file()}
+    assert len(reload_buffers(ws)) == 5
+
+
+def test_previous_snapshot_is_immutable_and_recovers_promotion_gap(tmp_path):
+    from ufo.agents.common.checkpoint import resolve_checkpoint_dir
+    ws = make_workspace(tmp_path)
+    buffer = make_buffer()
+    save(ws, buffer, "all")
+    source = tmp_path / "checkpoint/buffers/train_rank_0/buffer.hdf5"
+    old_buffer = source.read_bytes()
+    save(ws, buffer, "none", local_time=22)
+    backup = tmp_path / "checkpoint.previous"
+    assert (backup / "buffers/train_rank_0/buffer.hdf5").stat().st_ino == source.stat().st_ino
+    buffer.extend(row(99))
+    save(ws, buffer, "all", local_time=24)
+    assert (backup / "buffers/train_rank_0/buffer.hdf5").read_bytes() == old_buffer
+    assert source.read_bytes() != old_buffer
+    import shutil
+    shutil.rmtree(backup)
+    (tmp_path / "checkpoint").rename(backup)
+    assert resolve_checkpoint_dir(tmp_path / "checkpoint") == backup
+    assert len(reload_buffers(ws)) == 6
+    assert ws._checkpoint_local_time == 24
+    save(ws, buffer, "none", local_time=26)
+    assert (tmp_path / "checkpoint/train_status.json").exists()
+    assert (backup / "train_status.json").exists()
+
+
+def test_failed_promotion_and_rollback_leave_loadable_backup(tmp_path):
+    from ufo.agents.common.checkpoint import resolve_checkpoint_dir
+    ws = make_workspace(tmp_path)
+    buffer = make_buffer()
+    save(ws, buffer, "all")
+    rename = Path.rename
+    def fail(path, target):
+        if path.name.startswith(".checkpoint-") or path.name == "checkpoint.previous":
+            raise OSError("injected rename failure")
+        return rename(path, target)
+    with patch.object(Path, "rename", fail), pytest.raises(RuntimeError, match="restore from"):
+        save(ws, buffer, "all", local_time=22)
+    assert resolve_checkpoint_dir(tmp_path / "checkpoint") == tmp_path / "checkpoint.previous"
+    assert len(reload_buffers(ws)) == 5
+    assert ws._checkpoint_global_time == 20
+
+
+def test_inference_rejects_snapshot_replacement_during_load(tmp_path):
+    from ufo.agents.common.checkpoint import load_model_from_checkpoint_dir
+    from ufo.agents.fb_cpr_aux.model import FBcprAuxModel
+    (tmp_path / "model").mkdir()
+    (tmp_path / "model/config.json").write_text(json.dumps({"name": "FBcprAuxModel"}))
+    status = tmp_path / "train_status.json"
+    status.write_text('{"global_time": 20}')
+    def load(*args, **kwargs):
+        status.write_text('{"global_time": 22}')
+        return object()
+    with patch.object(FBcprAuxModel, "load", side_effect=load):
+        with pytest.raises(RuntimeError, match="changed while loading"):
             load_model_from_checkpoint_dir(tmp_path)

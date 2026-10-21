@@ -15,6 +15,19 @@ if tp.TYPE_CHECKING:
 SUPPORTED_SPACES = tp.Union[gym_spaces.Box, gym_spaces.Dict]
 
 
+def resolve_checkpoint_dir(path: str | Path) -> Path:
+    """Recover the previous complete save if promotion was interrupted."""
+    path = Path(path)
+    if path.is_dir() and not (path / ".saving").exists():
+        return path
+    previous = path.with_name(path.name + ".previous")
+    if (previous / "train_status.json").is_file() and not (previous / ".saving").exists():
+        return previous
+    if (path / ".saving").exists():
+        raise RuntimeError(f"Incomplete checkpoint save: {path}; no complete previous checkpoint")
+    return path
+
+
 def space_to_json(space: SUPPORTED_SPACES):
     """Convert a Gymnasium space to a JSON-serializable format."""
     if isinstance(space, gym_spaces.Box):
@@ -120,9 +133,9 @@ def checkpoint_load_device(device: str) -> str:
 
 
 def load_model_from_checkpoint_dir(checkpoint_dir: str, device: str = "cpu") -> tp.Any:
-    checkpoint_dir = Path(checkpoint_dir)
-    if (checkpoint_dir / ".saving").exists():
-        raise RuntimeError(f"Incomplete checkpoint save: {checkpoint_dir}")
+    checkpoint_dir = resolve_checkpoint_dir(checkpoint_dir)
+    status_path = checkpoint_dir / "train_status.json"
+    status_before = status_path.read_bytes() if status_path.exists() else None
     with (checkpoint_dir / "model" / "config.json").open("r") as f:
         config = json.load(f)
 
@@ -137,6 +150,9 @@ def load_model_from_checkpoint_dir(checkpoint_dir: str, device: str = "cpu") -> 
     model = model_name_to_class[model_name].load(checkpoint_dir / "model", device=device, load_target_networks=False)
     if (checkpoint_dir / ".saving").exists():
         raise RuntimeError(f"Checkpoint save started while loading: {checkpoint_dir}")
+    status_after = status_path.read_bytes() if status_path.exists() else None
+    if status_before != status_after:
+        raise RuntimeError(f"Checkpoint changed while loading: {checkpoint_dir}; retry after saving completes")
     return model
 
 

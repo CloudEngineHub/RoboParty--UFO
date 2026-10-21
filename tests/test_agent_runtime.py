@@ -385,3 +385,25 @@ def test_tech_cached_distribution_preserves_critic_updates_and_rng(device):
         torch.testing.assert_close(actual.optimizer_dict, reference.optimizer_dict, rtol=0, atol=0)
         rng = torch.cuda.get_rng_state() if device == "cuda" else torch.get_rng_state()
         assert torch.equal(rng, expected_rng)
+
+
+@pytest.mark.parametrize("family", ["fb", "tech"])
+def test_expert_rollout_selects_exact_number_of_distinct_environments(family):
+    from types import SimpleNamespace
+
+    from ufo.agents.fb_cpr_aux.agent import FBcprAuxAgent
+    from ufo.agents.tech.agent import TeCHAgent
+    cls = FBcprAuxAgent if family == "fb" else TeCHAgent
+    agent = cls.__new__(cls)
+    agent.cfg = SimpleNamespace(train=SimpleNamespace(
+        rollout_expert_trajectories=True, rollout_expert_trajectories_percentage=0.5,
+        rollout_expert_trajectories_length=250, update_z_every_step=100, use_mix_rollout=False,
+    ))
+    agent._model = SimpleNamespace(device="cpu", sample_z=lambda n, device: torch.zeros(n, 1))
+    agent._sample_tracking_z = lambda buffer, n, length: torch.ones(n, length, 1)
+    torch.manual_seed(4728)
+    z = None
+    for _ in range(2):
+        z = agent.maybe_update_rollout_context(z, torch.zeros(1024, 1, dtype=torch.long), {})
+        assert agent.env_idx_with_expert_rollout.unique().numel() == 512
+        assert z.sum() == 512

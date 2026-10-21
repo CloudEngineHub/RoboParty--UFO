@@ -90,34 +90,36 @@ class TrackingEvaluation:
             flush=True,
         )
 
-        # "Parallelization" is handled on the worker level.
-        metrics = {}
-        for repetition_i in range(self.cfg.n_episodes_per_motion):
-            run_metrics = {}
-            # If we have less envs than motions, we run iteratively over the motions
-            for motion_id_chunk_start in range(0, len(self.motion_ids), n_envs):
-                motion_id_chunk = self.motion_ids[motion_id_chunk_start : motion_id_chunk_start + n_envs]
-                motion_chunk_results = _evaluate_motion_batch(
-                    motion_id_chunk, agent_or_model,
-                    env=env,
-                    disable_tqdm=self.cfg.disable_tqdm,
-                    include_results_from_all_envs=self.cfg.include_results_from_all_envs,
-                )
-                for k, v in motion_chunk_results.items():
-                    assert k not in run_metrics, "Tried to override existing metric"
-                    run_metrics[k] = v
+        # Keep the training physics/DR, but use noise-free evaluation observations.
+        env._env.is_evaluating = True
+        try:
+            # "Parallelization" is handled on the worker level.
+            metrics = {}
+            for repetition_i in range(self.cfg.n_episodes_per_motion):
+                run_metrics = {}
+                # If we have less envs than motions, we run iteratively over the motions
+                for motion_id_chunk_start in range(0, len(self.motion_ids), n_envs):
+                    motion_id_chunk = self.motion_ids[motion_id_chunk_start : motion_id_chunk_start + n_envs]
+                    motion_chunk_results = _evaluate_motion_batch(
+                        motion_id_chunk, agent_or_model,
+                        env=env,
+                        disable_tqdm=self.cfg.disable_tqdm,
+                        include_results_from_all_envs=self.cfg.include_results_from_all_envs,
+                    )
+                    for k, v in motion_chunk_results.items():
+                        assert k not in run_metrics, "Tried to override existing metric"
+                        run_metrics[k] = v
 
-            if self.cfg.n_episodes_per_motion == 1:
-                # Just return metrics, do not change names
-                metrics = run_metrics
-            else:
-                # Append run number to metric names
-                for k, v in run_metrics.items():
-                    metrics[f"{k}_repetition#{repetition_i}"] = v
-
-        # All ranks restore their shared training environment, including ranks
-        # with no motions. Only scalar metric records cross the process group.
-        env._env.set_is_training()
+                if self.cfg.n_episodes_per_motion == 1:
+                    # Just return metrics, do not change names
+                    metrics = run_metrics
+                else:
+                    # Append run number to metric names
+                    for k, v in run_metrics.items():
+                        metrics[f"{k}_repetition#{repetition_i}"] = v
+        finally:
+            # Restore even on failure and on ranks with no assigned motions.
+            env._env.set_is_training()
 
         if distributed:
             shards = [None] * world_size if rank == 0 else None
@@ -223,20 +225,28 @@ def _evaluate_motion_batch(motion_ids, agent, env: Any, disable_tqdm: bool = Fal
     env_motion_index = torch.tensor([motion_index[m] for m in assigned.tolist()], device=core.device)
     env_lengths = lengths[env_motion_index]
 
-    observation, _ = env.reset(target_states={"dof_states": dof_states, "root_states": root_states}, to_numpy=False)
-    assert torch.allclose(core.dof_pos, dof_states[..., 0])
+    physics_cfg = core.mjlab_env.cfg
+    training_episode_length = physics_cfg.episode_length_s
+    physics_cfg.episode_length_s = max(training_episode_length, (max_length + 1) * core.dt)
+    try:
+        observation, _ = env.reset(target_states={"dof_states": dof_states, "root_states": root_states}, to_numpy=False)
+        assert torch.allclose(core.dof_pos, dof_states[..., 0])
 
-    # Metrics consume only joint positions and the joint-position prefix of
-    # state. Retain snapshots on device and transfer once after the rollout.
-    num_dofs = dof_states.shape[1]
-    observation_states = [observation["state"][..., :num_dofs].clone()]
-    joint_positions = [core.dof_pos.clone()]
-    for step in tqdm(range(max_length), desc="Tracking Evaluation", disable=disable_tqdm):
-        context = padded[env_motion_index, step % env_lengths]
-        action = agent.act(observation, context, mean=True)
-        observation, _, _, _, _ = env.step(action, to_numpy=False)
-        observation_states.append(observation["state"][..., :num_dofs].clone())
-        joint_positions.append(core.dof_pos.clone())
+        # Metrics consume only joint positions and the joint-position prefix of
+        # state. Retain snapshots on device and transfer once after the rollout.
+        num_dofs = dof_states.shape[1]
+        observation_states = [observation["state"][..., :num_dofs].clone()]
+        joint_positions = [core.dof_pos.clone()]
+        for step in tqdm(range(max_length), desc="Tracking Evaluation", disable=disable_tqdm):
+            context = padded[env_motion_index, step % env_lengths]
+            action = agent.act(observation, context, mean=True)
+            observation, _, terminated, truncated, _ = env.step(action, to_numpy=False)
+            if torch.any(terminated | truncated):
+                raise RuntimeError("Tracking evaluation reset before the reference ended; refusing invalid metrics")
+            observation_states.append(observation["state"][..., :num_dofs].clone())
+            joint_positions.append(core.dof_pos.clone())
+    finally:
+        physics_cfg.episode_length_s = training_episode_length
     observation_states = torch.stack(observation_states).cpu()
     joint_positions = torch.stack(joint_positions)
 

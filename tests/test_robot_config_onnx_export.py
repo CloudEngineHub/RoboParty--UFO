@@ -11,9 +11,8 @@ from unittest.mock import patch
 import torch
 from torch import nn
 
-from ufo.tools.export_onnx import export_meta_policy_as_onnx, export_policy_model
-from ufo.tools.export_onnx import _deployment_contract
 from ufo.envs.config import MJLabEnvConfig
+from ufo.tools.export_onnx import _deployment_contract, export_meta_policy_as_onnx, export_policy_model
 from ufo.tools.robot_config import load_robot_training_spec
 
 

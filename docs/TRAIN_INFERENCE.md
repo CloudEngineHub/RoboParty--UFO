@@ -60,6 +60,21 @@ requirement satisfied, training restores replay only when every rank snapshot
 matches the model save ID and world size; otherwise all ranks warm up fresh replay.
 Environment/RNG state is not saved. See [save and restore behavior](ARCHITECTURE.md#completion-planned-stopping-and-replay-restore).
 
+Checkpoint saves are staged before replacing `checkpoint`; `checkpoint.previous`
+retains the preceding complete snapshot. Training and inference fall back to it
+if replacement was interrupted. Unchanged replay files share disk storage; a new
+replay snapshot may temporarily require space for both versions.
+
+Training-time tracking evaluation disables observation noise while retaining the
+training physics and domain randomization. Its temporary episode limit covers
+the entire reference motion, and unexpected resets fail evaluation rather than
+entering the metrics. This changes evaluation conditions relative to older runs;
+re-evaluate checkpoints under the same conditions before comparing EMD.
+
+The legacy `randomize_torque_rfi`, `randomize_rfi_lim`, and
+`randomize_ctrl_delay` options are unsupported and rejected when enabled.
+RP1's motor delay remains configured through `training.actuator`.
+
 During multi-GPU training, tracking evaluation runs on every rank. Motion IDs
 are partitioned as `rank, rank + world_size, ...`; with 8 GPUs each rank evaluates
 approximately one eighth of the motions. Each rank reuses its training

@@ -39,6 +39,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 
 def test_reward_export_contains_numpy_and_still_runs_rollout(tmp_path, monkeypatch):
     import joblib
+
     from ufo.inference import reward_inference as module
 
     checkpoint = tmp_path / 'checkpoint'

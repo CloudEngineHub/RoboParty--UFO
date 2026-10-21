@@ -17,7 +17,7 @@ import numpy as np
 import torch
 from torch.utils._pytree import tree_map
 
-from ufo.agents.common.checkpoint import checkpoint_load_device, load_model_from_checkpoint_dir
+from ufo.agents.common.checkpoint import checkpoint_load_device, load_model_from_checkpoint_dir, resolve_checkpoint_dir
 from ufo.inference.runtime import (
     MujocoQposRenderer,
     _target_states_from_obs,
@@ -103,7 +103,7 @@ def run_tracking_inference(
     motion_names: list[str] | None = None,
 ) -> None:
     model_folder = model_folder.expanduser().resolve()
-    checkpoint_dir = model_folder / "checkpoint"
+    checkpoint_dir = resolve_checkpoint_dir(model_folder / "checkpoint")
     if not checkpoint_dir.exists():
         raise FileNotFoundError(f"Missing checkpoint directory: {checkpoint_dir}")
 

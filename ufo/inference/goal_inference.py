@@ -22,7 +22,7 @@ import torch
 from torch.utils._pytree import tree_map
 from tqdm import tqdm
 
-from ufo.agents.common.checkpoint import checkpoint_load_device, load_model_from_checkpoint_dir
+from ufo.agents.common.checkpoint import checkpoint_load_device, load_model_from_checkpoint_dir, resolve_checkpoint_dir
 from ufo.inference.runtime import (
     UFO_DIR,
     MujocoQposRenderer,
@@ -151,7 +151,7 @@ def run_goal_inference(
     if save_mp4 and (episode_len <= 0 or goal_switch_interval <= 0):
         raise ValueError("episode_len and goal_switch_interval must be positive")
     model_folder = model_folder.expanduser().resolve()
-    checkpoint_dir = model_folder / "checkpoint"
+    checkpoint_dir = resolve_checkpoint_dir(model_folder / "checkpoint")
     if not checkpoint_dir.exists():
         raise FileNotFoundError(f"Missing checkpoint directory: {checkpoint_dir}")
 

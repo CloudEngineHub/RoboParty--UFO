@@ -318,3 +318,17 @@ def test_motion_data_name_roundtrip_rejects_retired_alias(paths):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+@pytest.mark.parametrize("flag", ["randomize_torque_rfi", "randomize_rfi_lim", "randomize_ctrl_delay"])
+def test_unsupported_domain_randomization_is_rejected(flag):
+    from ufo.tools.robot_config import load_robot_training_spec
+    spec = load_robot_training_spec("configs/robots/g1_29dof.yaml")
+    cfg = MJLabEnvConfig(motion_data_path="unused", robot_training=spec.to_env_dict(),
+                         task_overrides={"domain_rand": {flag: True}})
+    with pytest.raises(ValueError, match=flag):
+        resolve_task_config(cfg, 2)
+    # Disabling DR is still a valid way to turn an inherited setting off.
+    task = resolve_task_config(cfg.model_copy(update={"disable_domain_randomization": True}), 2)
+    assert not task.domain_rand[flag]
+    assert not task.domain_rand.push_robots

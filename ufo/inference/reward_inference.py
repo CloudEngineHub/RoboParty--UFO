@@ -32,7 +32,7 @@ import torch
 from dm_control.utils import rewards
 
 from ufo.agents.common.buffers.trajectory import ReplayBuffer
-from ufo.agents.common.checkpoint import checkpoint_load_device, load_model_from_checkpoint_dir
+from ufo.agents.common.checkpoint import checkpoint_load_device, load_model_from_checkpoint_dir, resolve_checkpoint_dir
 from ufo.inference.runtime import (
     MujocoQposRenderer,
     add_bool_arg,
@@ -1211,7 +1211,7 @@ def _load_replay_buffer(
     buffer_path: Path | None,
 ) -> tuple[object, Path]:
     if buffer_path is None:
-        buffer_path = model_folder / "checkpoint" / "buffers" / f"train_rank_{buffer_rank}"
+        buffer_path = resolve_checkpoint_dir(model_folder / "checkpoint") / "buffers" / f"train_rank_{buffer_rank}"
     buffer_path = buffer_path.expanduser().resolve()
     if not buffer_path.is_dir():
         raise FileNotFoundError(f"Missing replay buffer path: {buffer_path}")
@@ -1232,7 +1232,7 @@ def _load_replay_buffer(
 
 
 def _require_fb_checkpoint(model_folder: Path) -> None:
-    with (Path(model_folder) / "checkpoint" / "config.json").open() as stream:
+    with (resolve_checkpoint_dir(Path(model_folder) / "checkpoint") / "config.json").open() as stream:
         config = json.load(stream)
     if config["model"]["name"] != "FBcprAuxModel":
         raise ValueError("Reward inference requires an FB checkpoint; TeCH supports tracking and goal inference only.")
@@ -1265,7 +1265,7 @@ def run_reward_inference(
     export_onnx: bool,
 ) -> None:
     model_folder = model_folder.expanduser().resolve()
-    checkpoint_dir = model_folder / "checkpoint"
+    checkpoint_dir = resolve_checkpoint_dir(model_folder / "checkpoint")
     if not checkpoint_dir.exists():
         raise FileNotFoundError(f"Missing checkpoint directory: {checkpoint_dir}")
 

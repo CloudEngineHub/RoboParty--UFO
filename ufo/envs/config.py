@@ -544,6 +544,11 @@ def resolve_task_config(env, num_envs):
         for name in task.domain_rand:
             if name.startswith("randomize_") or name == "push_robots":
                 task.domain_rand[name] = False
+    unsupported = [name for name in ("randomize_torque_rfi", "randomize_rfi_lim", "randomize_ctrl_delay")
+                   if task.domain_rand.get(name, False)]
+    if unsupported:
+        raise ValueError(f"Unsupported mjlab domain randomization: {', '.join(unsupported)}. "
+                         "RP1 motor delay is configured separately in training.actuator.")
     if env.max_episode_length_s is not None:
         task.max_episode_length_s = env.max_episode_length_s
     if any(task.termination.values()):

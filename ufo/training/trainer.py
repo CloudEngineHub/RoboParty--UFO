@@ -4,6 +4,7 @@
 # LICENSE file in the root directory of this source tree.
 
 import os
+import shutil
 
 from ufo.motion.reference import load_expert_trajectories_from_motion_lib
 from ufo.training.config import AgentConfig, TrainConfig
@@ -30,6 +31,7 @@ from tqdm import tqdm
 
 from ufo.agents.common.buffers.storage import replay_storage_dtype
 from ufo.agents.common.buffers.trajectory import ReplayBuffer
+from ufo.agents.common.checkpoint import resolve_checkpoint_dir
 from ufo.training.distributed import (
     all_ranks_true,
     average_metrics,
@@ -289,7 +291,7 @@ class Trainer:
         expert_buffer = load_expert_trajectories_from_motion_lib(self.train_env._env, self.cfg.agent, device=self.cfg.buffer_device)
         print("Allocating buffers")
         replay_buffer = {}
-        checkpoint_dir = self.work_dir / CHECKPOINT_DIR_NAME
+        checkpoint_dir = resolve_checkpoint_dir(self.work_dir / CHECKPOINT_DIR_NAME)
         checkpoint_buffer_dir = self._checkpoint_buffer_path(checkpoint_dir)
         restore = _replay_matches_checkpoint(checkpoint_buffer_dir, self._checkpoint_status)
         if self.cfg.distributed_sync:
@@ -615,36 +617,82 @@ class Trainer:
         snapshot_id = uuid.uuid4().hex if self.distributed_rank == 0 else None
         if self.cfg.distributed_sync:
             snapshot_id = broadcast_object(snapshot_id, src=0)
+        staging = self.work_dir / f".checkpoint-{snapshot_id}.tmp"
+        previous = self.work_dir / (CHECKPOINT_DIR_NAME + ".previous")
+
+        def check_save_error(error):
+            succeeded = error is None
+            if self.cfg.distributed_sync:
+                succeeded = all_ranks_true(succeeded, self.agent.device)
+            if not succeeded:
+                if self.distributed_rank == 0:
+                    shutil.rmtree(staging, ignore_errors=True)
+                raise RuntimeError(f"Checkpoint save failed; previous snapshot retained: {error or 'another rank failed'}") from error
+
+        error = None
         if self.distributed_rank == 0:
-            checkpoint_dir.mkdir(parents=True, exist_ok=True)
-            # A crash during an in-place save must never look like a valid checkpoint.
-            (checkpoint_dir / ".saving").touch()
-            print(f"Checkpointing at local_time={local_time} global_time={global_time} "
-                  f"optimizer_steps={optimizer_steps} replay={replay_mode}", flush=True)
-            self.agent.save(str(checkpoint_dir))
+            try:
+                staging.mkdir()
+                (staging / ".saving").touch()
+                source = resolve_checkpoint_dir(checkpoint_dir)
+                buffers = source / "buffers"
+                if buffers.exists():
+                    # Immutable replay files can be retained without copying gigabytes.
+                    shutil.copytree(buffers, staging / "buffers", copy_function=os.link)
+                print(f"Checkpointing at local_time={local_time} global_time={global_time} "
+                      f"optimizer_steps={optimizer_steps} replay={replay_mode}", flush=True)
+                self.agent.save(str(staging))
+            except Exception as exc:
+                error = exc
+        check_save_error(error)
+
+        error = None
         if replay_mode == "all" or (replay_mode == "rank0" and self.distributed_rank == 0):
-            buffer_path = self._checkpoint_buffer_path(checkpoint_dir)
-            marker = buffer_path / "snapshot.json"
-            marker.unlink(missing_ok=True)
-            if len(replay_buffer["train"]):
-                replay_buffer["train"].save(buffer_path)
-                _write_json(marker, {"id": snapshot_id, "global_time": global_time, "world_size": self.distributed_world_size,
-                                     "transition_format": 2})
-        if self.cfg.distributed_sync:
-            barrier()
+            try:
+                buffer_path = self._checkpoint_buffer_path(staging)
+                # Unlink the inherited shard before writing; never truncate its hard links.
+                if buffer_path.exists():
+                    shutil.rmtree(buffer_path)
+                if len(replay_buffer["train"]):
+                    replay_buffer["train"].save(buffer_path)
+                    _write_json(buffer_path / "snapshot.json", {
+                        "id": snapshot_id, "global_time": global_time, "world_size": self.distributed_world_size,
+                        "transition_format": 2,
+                    })
+            except Exception as exc:
+                error = exc
+        check_save_error(error)
+
         status = _make_train_status(
             self.cfg, local_time=local_time, global_time=global_time, optimizer_steps=optimizer_steps,
         )
         status["replay_id"] = snapshot_id if replay_mode == "all" or (replay_mode == "rank0" and self.distributed_world_size == 1) else None
         status["buffer_global_time"] = global_time if replay_mode != "none" else self._checkpoint_status.get("buffer_global_time", 0)
         status["replay_update_after"] = self._replay_update_after
+        error = None
         if self.distributed_rank == 0:
-            if sync_report is not None:
-                _write_json(checkpoint_dir / "distributed_sync.json", sync_report)
-            _write_json(checkpoint_dir / "train_status.json", status)
-            (checkpoint_dir / ".saving").unlink()
-        if self.cfg.distributed_sync:
-            barrier()
+            try:
+                if sync_report is not None:
+                    _write_json(staging / "distributed_sync.json", sync_report)
+                _write_json(staging / "train_status.json", status)
+                (staging / ".saving").unlink()
+                if checkpoint_dir.exists():
+                    if (checkpoint_dir / ".saving").exists():
+                        # A legacy incomplete save must not replace a valid backup.
+                        shutil.rmtree(checkpoint_dir)
+                    else:
+                        if previous.exists():
+                            shutil.rmtree(previous)
+                        checkpoint_dir.rename(previous)
+                staging.rename(checkpoint_dir)
+            except Exception as exc:
+                error = exc
+                if not checkpoint_dir.exists() and previous.exists():
+                    try:
+                        previous.rename(checkpoint_dir)
+                    except OSError as rollback_error:
+                        error = RuntimeError(f"{exc}; restore from {previous}: {rollback_error}")
+        check_save_error(error)
         self._checkpoint_status = status
 
     def _check_finite(self, value, *, label: str, local_time: int, global_time: int) -> None:
@@ -740,9 +788,7 @@ def _replay_matches_checkpoint(buffer_path: Path, status: dict) -> bool:
 
 
 def create_agent_or_load_checkpoint(work_dir: Path, cfg: TrainConfig, agent_build_kwargs: dict[str, tp.Any]):
-    checkpoint_dir = work_dir / CHECKPOINT_DIR_NAME
-    if (checkpoint_dir / ".saving").exists():
-        raise RuntimeError(f"Incomplete checkpoint save: {checkpoint_dir}; restore a verified backup or use a fresh work_dir.")
+    checkpoint_dir = resolve_checkpoint_dir(work_dir / CHECKPOINT_DIR_NAME)
     train_status_path = checkpoint_dir / "train_status.json"
     checkpoint_status = _initial_train_status(cfg)
     if train_status_path.exists():

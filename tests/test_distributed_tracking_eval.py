@@ -26,13 +26,14 @@ def _metric(motion_id):
 def _evaluation(num_motions, repetitions=1):
     cfg = tracking.TrackingEvaluationConfig(n_episodes_per_motion=repetitions)
     motion_lib = SimpleNamespace(_num_unique_motions=num_motions, load_motions_for_training=Mock())
-    core = SimpleNamespace(_motion_lib=motion_lib, num_envs=2, reset_all=Mock(), is_evaluating=True)
+    core = SimpleNamespace(_motion_lib=motion_lib, num_envs=2, reset_all=Mock(), is_evaluating=False)
     core.resample_motion = MethodType(MJLabCore.resample_motion, core)
     core.set_is_training = Mock(side_effect=MethodType(MJLabCore.set_is_training, core))
     return cfg.build(), SimpleNamespace(_env=core, close=Mock())
 
 
 def _worker(motion_ids, agent, **kwargs):
+    assert kwargs["env"]._env.is_evaluating
     return {f"motion_{motion_id}": _metric(motion_id) for motion_id in motion_ids}
 
 
@@ -255,6 +256,8 @@ def test_tracking_worker_uses_current_vector_env_without_legacy_context():
         num_dof=1,
         device="cpu",
         dof_pos=torch.zeros(2, 1),
+        dt=0.02,
+        mjlab_env=SimpleNamespace(cfg=SimpleNamespace(episode_length_s=10.0)),
         _motion_lib=SimpleNamespace(all_motions_loaded=True, curr_motion_keys=["motion"]),
     )
 
@@ -283,3 +286,56 @@ def test_tracking_worker_uses_current_vector_env_without_legacy_context():
         metrics = tracking._evaluate_motion_batch([0], agent, Env(), disable_tqdm=True)
     assert metrics["motion"]["motion_id"] == 0
     assert metrics["motion"]["emd"] == 0.0
+
+
+def test_evaluation_restores_training_mode_after_failure():
+    evaluation, env = _evaluation(1)
+    def fail(*args, **kwargs):
+        assert env._env.is_evaluating
+        raise RuntimeError("injected evaluation failure")
+    with patch.object(tracking, "_evaluate_motion_batch", side_effect=fail):
+        with pytest.raises(RuntimeError, match="injected"):
+            evaluation.run(timestep=0, agent_or_model=None, env=env, logger=None)
+    assert not env._env.is_evaluating
+    env._env.set_is_training.assert_called_once()
+
+
+@pytest.mark.parametrize("unexpected_reset", [False, True])
+def test_long_tracking_extends_timeout_and_rejects_reset_states(unexpected_reset):
+    count = 551
+    core = SimpleNamespace(num_envs=1, num_dof=1, device="cpu", dt=0.02, dof_pos=torch.zeros(1, 1),
+        mjlab_env=SimpleNamespace(cfg=SimpleNamespace(episode_length_s=10.0)),
+        _motion_lib=SimpleNamespace(all_motions_loaded=True, curr_motion_keys=["motion"]))
+    class Env:
+        include_last_action = False
+        _env = core
+        step_count = 0
+        def reset(self, **kwargs):
+            assert core.mjlab_env.cfg.episode_length_s > (count - 1) * core.dt
+            return {"state": core.dof_pos.clone()}, {}
+        def step(self, action, **kwargs):
+            self.step_count += 1
+            timeout = self.step_count * core.dt >= core.mjlab_env.cfg.episode_length_s
+            done = timeout or (unexpected_reset and self.step_count == 500)
+            core.dof_pos.fill_(-100 if done else self.step_count)
+            return {"state": core.dof_pos.clone()}, torch.zeros(1), torch.tensor([False]), torch.tensor([done]), {}
+    env = Env()
+    agent = SimpleNamespace(_model=SimpleNamespace(tracking_inference=lambda obs: obs["state"]),
+                            act=lambda *args, **kwargs: torch.zeros(1, 1))
+    reference = {"dof_pos": torch.arange(count).float().view(count, 1), "ref_dof_vel": torch.zeros(count, 1),
+                 "ref_body_pos": torch.zeros(count, 1, 3), "ref_body_rots": torch.zeros(count, 1, 4),
+                 "ref_body_vels": torch.zeros(count, 1, 3), "ref_body_angular_vels": torch.zeros(count, 1, 3)}
+    captured = []
+    def metric(ep):
+        captured.append(ep["joint_pos"])
+        return {"motion": {"motion_id": 0, "emd": 0.0}}
+    with patch.object(tracking, "get_backward_observation", return_value=({"state": reference["dof_pos"]}, reference)), \
+         patch.object(tracking, "_calc_metrics", side_effect=metric):
+        if unexpected_reset:
+            with pytest.raises(RuntimeError, match="refusing invalid metrics"):
+                tracking._evaluate_motion_batch([0], agent, env, disable_tqdm=True)
+            assert not captured
+        else:
+            tracking._evaluate_motion_batch([0], agent, env, disable_tqdm=True)
+            torch.testing.assert_close(captured[0], reference["dof_pos"])
+    assert core.mjlab_env.cfg.episode_length_s == 10.0

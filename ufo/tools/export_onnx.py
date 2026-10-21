@@ -15,7 +15,7 @@ import torch
 import torch.nn.functional as F
 from torch import nn
 
-from ufo.agents.common.checkpoint import checkpoint_load_device, load_model_from_checkpoint_dir
+from ufo.agents.common.checkpoint import checkpoint_load_device, load_model_from_checkpoint_dir, resolve_checkpoint_dir
 
 _SUPPORTED_POLICY_ACTOR_INPUT_KEYS = ("state", "last_action", "history_actor")
 
@@ -335,7 +335,7 @@ def export_backward_encoder_from_checkpoint(
     """Load a checkpoint and export its FB backward encoder to ONNX."""
 
     model_folder = Path(model_folder).expanduser().resolve()
-    checkpoint_dir = model_folder / checkpoint_subdir
+    checkpoint_dir = resolve_checkpoint_dir(model_folder / checkpoint_subdir)
     if not checkpoint_dir.exists():
         raise FileNotFoundError(f"checkpoint dir not found: {checkpoint_dir}")
 
@@ -405,7 +405,8 @@ def _verify_backward_encoder_onnx(
 
 def _deployment_contract(model, env_config) -> dict[str, Any]:
     from omegaconf import OmegaConf
-    from ufo.envs.config import resolve_task_config, _action_target_scale_values, _match_joint_value
+
+    from ufo.envs.config import _action_target_scale_values, _match_joint_value, resolve_task_config
 
     task = resolve_task_config(env_config, 1)
     names = list(task.robot.dof_names)

@@ -585,7 +585,7 @@ class TeCHAgent(AgentExecutionMixin):
                 idxs = step_count % self.cfg.train.rollout_expert_trajectories_length
                 if torch.any(idxs == 0):
                     n_elem = int(self.cfg.train.rollout_expert_trajectories_percentage * step_count.shape[0])
-                    self.env_idx_with_expert_rollout = torch.randint(0, step_count.shape[0], size=(n_elem,), device=self._model.device)
+                    self.env_idx_with_expert_rollout = torch.randperm(step_count.shape[0], device=self._model.device)[:n_elem]
                     self.tracking_z = self._sample_tracking_z(replay_buffer, n_elem, self.cfg.train.rollout_expert_trajectories_length)
                 if self.env_idx_with_expert_rollout is not None:
                     mod_time = idxs[self.env_idx_with_expert_rollout].ravel()
@@ -596,7 +596,7 @@ class TeCHAgent(AgentExecutionMixin):
             z = self._model.sample_z(step_count.shape[0], device=self._model.device)
             if self.cfg.train.rollout_expert_trajectories and replay_buffer is not None:
                 n_elem = int(self.cfg.train.rollout_expert_trajectories_percentage * step_count.shape[0])
-                self.env_idx_with_expert_rollout = torch.randint(0, step_count.shape[0], size=(n_elem,), device=self._model.device)
+                self.env_idx_with_expert_rollout = torch.randperm(step_count.shape[0], device=self._model.device)[:n_elem]
                 self.tracking_z = self._sample_tracking_z(replay_buffer, n_elem, self.cfg.train.rollout_expert_trajectories_length)
                 z[self.env_idx_with_expert_rollout] = self.tracking_z[:, 0]
         return z
